@@ -177,6 +177,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
             <th style="width:185px">Student</th>
             <th style="width:60px">Class</th>
             <th>1st choice</th><th>2nd choice</th><th>3rd choice</th>
+            <th style="width:80px">Status</th>
             <th style="width:58px"></th>
           </tr></thead>
           <tbody id="sb"></tbody>
@@ -216,14 +217,24 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
             </select>
           </div>
         </div>
-        <div style="display:flex;justify-content:flex-end">
-          <button class="btn btn-p" onclick="addIv()"><i class="ti ti-calendar-plus"></i> Schedule</button>
+        <div class="r2">
+          <div><label>Interview mode</label>
+            <select id="i-mode">
+              <option value="Face to Face">Face to Face</option>
+              <option value="Online">Online</option>
+              <option value="NA">NA (no interview)</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end;padding-bottom:10px">
+            <button class="btn btn-p" onclick="addIv()" style="width:100%"><i class="ti ti-calendar-plus"></i> Schedule</button>
+          </div>
         </div>
       </div>
       <div class="fbar">
         <select id="f-co" onchange="renderIv()" style="min-width:220px;margin-bottom:0"><option value="">All companies</option></select>
         <select id="f-fo" onchange="renderIv()" style="margin-bottom:0"><option value="">All choices</option><option value="1">1st choice only</option></select>
         <select id="f-st" onchange="renderIv()" style="margin-bottom:0"><option value="">All statuses</option><option>Pending</option><option>Success</option><option>Reject</option></select>
+        <select id="f-mode" onchange="renderIv()" style="margin-bottom:0"><option value="">All modes</option><option value="Face to Face">Face to Face</option><option value="Online">Online</option><option value="NA">NA</option></select>
         <button class="btn" onclick="sendTodayReminders()" style="margin-left:auto;white-space:nowrap;color:var(--txs);border-color:var(--txs)">
           <i class="ti ti-brand-whatsapp"></i> WhatsApp today's reminders
         </button>
@@ -236,6 +247,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
             <th>Company</th>
             <th style="width:62px">Choice</th>
             <th style="width:130px">Date &amp; time</th>
+            <th style="width:72px">Mode</th>
             <th style="width:76px">Status</th>
             <th style="width:72px"></th>
           </tr></thead>
@@ -408,7 +420,7 @@ var eid = null; // id of record being edited in modal
 // Used in: export filenames, import migration checks,
 //          and the version badge shown in the header.
 // ============================================================
-var APP_VERSION = '2025.05.16';
+var APP_VERSION = '2025.05.17';
 var LS_KEY      = 'ims_v3'; // bump key when schema changes
 
 // ============================================================
@@ -652,9 +664,9 @@ function importData(event) {
       }
 
       // Migration pre-v2025: backfill missing fields on interviews
-      // (older versions may not have had 'rank' field)
       d.ivs = (d.ivs || []).map(function(iv) {
-        if (iv.rank === undefined) iv.rank = 1; // default to 1st choice
+        if (iv.rank === undefined) iv.rank = 1;           // default to 1st choice
+        if (iv.mode === undefined) iv.mode = 'Face to Face'; // default mode
         return iv;
       });
 
@@ -875,12 +887,71 @@ function renderStu() {
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (st.choices[0]||'') + '">' + (st.choices[0]||'&mdash;') + '</td>' +
       '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tx2)" title="' + (st.choices[1]||'') + '">' + (st.choices[1]||'&mdash;') + '</td>' +
       '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tx2)" title="' + (st.choices[2]||'') + '">' + (st.choices[2]||'&mdash;') + '</td>' +
-      '<td><button class="act" onclick="openES(' + s.idx + ')" title="Edit choices"><i class="ti ti-edit"></i></button></td>' +
+      '<td>' + stuStatusBadge(s.idx) + '</td>' +
+      '<td>' +
+        '<button class="act stu-edit" data-idx="' + encodeURIComponent(s.idx) + '" title="Edit choices"><i class="ti ti-edit"></i></button>' +
+        (!isPlaced(s.idx) ? '<button class="act stu-place" data-idx="' + encodeURIComponent(s.idx) + '" style="color:var(--txs)" title="Mark as placed"><i class="ti ti-check"></i></button>' : '') +
+      '</td>' +
     '</tr>';
   }).join('');
 }
 
 /** coOpts — build <option> list for company dropdowns in edit modal */
+/**
+ * isPlaced — returns true if student has a Success interview or direct placement
+ */
+function isPlaced(idx) {
+  return ivs.some(function(iv){ return String(iv.idx)===String(idx) && iv.status==='Success'; });
+}
+
+/**
+ * hasPending — returns true if student has any Pending interview
+ */
+function hasPending(idx) {
+  return ivs.some(function(iv){ return String(iv.idx)===String(idx) && iv.status==='Pending'; });
+}
+
+/**
+ * stuStatusBadge — returns the HTML badge for a student's current placement status
+ */
+function stuStatusBadge(idx) {
+  if (isPlaced(idx))   return '<span class="bdg bs">Placed</span>';
+  if (hasPending(idx)) return '<span class="bdg bp">Pending</span>';
+  if (ivs.some(function(iv){ return String(iv.idx)===String(idx); }))
+    return '<span class="bdg br">Rejected</span>';
+  return '<span class="bdg bn">Not started</span>';
+}
+
+/**
+ * markPlaced — directly mark a student as placed without a formal interview.
+ * Creates a special interview record with mode "Direct" and status "Success".
+ */
+function markPlaced(idx) {
+  idx = String(idx); // ensure string type
+  var s = RAW.find(function(r){ return String(r.idx)===idx; });
+  if (!s) { toast('Student not found'); return; }
+  if (!confirm('Mark ' + s.name + ' as placed directly (no interview)?')) return;
+
+  var company = ST[String(idx)] ? (ST[String(idx)].choices[0] || 'Direct placement') : 'Direct placement';
+  var id = Date.now();
+  ivs.push({
+    id: id,
+    idx: String(idx),
+    name: s.name,
+    cls: s.cls,
+    company: company,
+    rank: 1,
+    dt: new Date().toISOString().slice(0,16),
+    status: 'Success',
+    mode: 'NA'
+  });
+  saveData();
+  renderStu();
+  renderIv();
+  mets();
+  toast(s.name.split(' ')[0] + ' marked as placed');
+}
+
 function coOpts(selected) {
   var h = '<option value="">-- none --</option>';
   cos.forEach(function(c) {
@@ -891,8 +962,10 @@ function coOpts(selected) {
 
 /** openES — open Edit Student choices modal */
 function openES(idx) {
-  var s  = RAW.find(function(r){ return String(r.idx)===String(idx); });
-  var st = ST[String(idx)] || { choices: ['','',''], log: [] };
+  idx = String(idx); // ensure string type
+  var s  = RAW.find(function(r){ return String(r.idx)===idx; });
+  if (!s) { toast('Student not found'); return; }
+  var st = ST[idx] || { choices: ['','',''], log: [] };
   eid    = idx;
   document.getElementById('mod-t').textContent = 'Edit choices \u2014 ' + s.name;
   document.getElementById('mod-b').innerHTML =
@@ -922,6 +995,15 @@ function saveES() {
 // SECTION 7: INTERVIEWS TAB
 // ============================================================
 
+/**
+ * modeBadge — returns a styled badge for the interview mode
+ */
+function modeBadge(mode) {
+  if (mode === 'Face to Face') return '<span class="bdg bi" style="font-size:10px">F2F</span>';
+  if (mode === 'Online')       return '<span class="bdg bp" style="font-size:10px">Online</span>';
+  return '<span class="bdg bn" style="font-size:10px">NA</span>';
+}
+
 function renderIv() {
   var co = document.getElementById('f-co').value;
   var fo = document.getElementById('f-fo').value;
@@ -933,10 +1015,12 @@ function renderIv() {
     return;
   }
 
+  var modeF = document.getElementById('f-mode') ? document.getElementById('f-mode').value : '';
   var rows = ivs.filter(function(iv) {
     if (co && iv.company !== co) return false;
     if (fo === '1' && iv.rank !== 1) return false;
     if (st && iv.status !== st) return false;
+    if (modeF && (iv.mode||'Face to Face') !== modeF) return false;
     return true;
   });
 
@@ -960,6 +1044,7 @@ function renderIv() {
       '<td title="' + iv.company + '" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + iv.company + '</td>' +
       '<td><span class="ch ' + (cc[iv.rank]||'') + '">' + (cl[iv.rank]||'--') + '</span></td>' +
       '<td style="color:var(--tx2);font-size:12px">' + ds + '</td>' +
+      '<td>' + modeBadge(iv.mode) + '</td>' +
       '<td><span class="bdg ' + bc[iv.status] + '">' + iv.status + '</span></td>' +
       '<td>' +
         '<button class="act" onclick="openEI(' + iv.id + ')" title="Edit"><i class="ti ti-edit"></i></button>' +
@@ -983,7 +1068,8 @@ function addIv() {
   var rank = (ST[sidx] ? ST[sidx].choices.indexOf(company) + 1 : 0) || 1;
   var id   = Date.now();
 
-  ivs.push({ id:id, idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status });
+  var mode = document.getElementById('i-mode') ? document.getElementById('i-mode').value : 'Face to Face';
+  ivs.push({ id:id, idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode });
 
   // Auto-promote choices if rejected immediately
   if (status === 'Reject') promote(sidx);
@@ -1014,6 +1100,7 @@ function openEI(id) {
   eid = id;
   var iv = ivs.find(function(i){ return i.id===id; });
   document.getElementById('mod-t').textContent = 'Edit interview';
+  var ivMode = iv.mode || 'Face to Face';
   document.getElementById('mod-b').innerHTML =
     '<label>Date &amp; time</label><input type="datetime-local" id="e-dt" value="' + iv.dt + '">' +
     '<label>Status</label>' +
@@ -1021,6 +1108,12 @@ function openEI(id) {
       '<option value="Pending"' + (iv.status==='Pending'?' selected':'') + '>Pending</option>' +
       '<option value="Success"' + (iv.status==='Success'?' selected':'') + '>Success</option>' +
       '<option value="Reject"'  + (iv.status==='Reject' ?' selected':'') + '>Reject</option>' +
+    '</select>' +
+    '<label>Interview mode</label>' +
+    '<select id="e-mode">' +
+      '<option value="Face to Face"' + (ivMode==='Face to Face'?' selected':'') + '>Face to Face</option>' +
+      '<option value="Online"'       + (ivMode==='Online'      ?' selected':'') + '>Online</option>' +
+      '<option value="NA"'           + (ivMode==='NA'          ?' selected':'') + '>NA (no interview)</option>' +
     '</select>';
   document.getElementById('mod-f').innerHTML =
     '<button class="btn" onclick="closeMod()">Cancel</button>' +
@@ -1033,6 +1126,7 @@ function saveEI() {
   var old = iv.status;
   iv.dt     = document.getElementById('e-dt').value;
   iv.status = document.getElementById('e-st').value;
+  iv.mode   = document.getElementById('e-mode') ? document.getElementById('e-mode').value : (iv.mode || 'Face to Face');
   if (old !== 'Reject' && iv.status === 'Reject') promote(String(iv.idx));
   saveData();
   renderIv(); renderStu(); mets(); onSC();
@@ -1202,7 +1296,8 @@ function sendTodayReminders() {
   if (!todayIvs.length) { toast('No interviews scheduled for today'); return; }
   var rows = todayIvs.map(function(iv,i) {
     var t = new Date(iv.dt).toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
-    return (i+1) + '. ' + iv.name + ' (' + iv.cls + ')\n   Company: ' + iv.company + '\n   Time: ' + t;
+    var m = iv.mode || 'Face to Face';
+    return (i+1) + '. ' + iv.name + ' (' + iv.cls + ')\n   Company: ' + iv.company + '\n   Mode: ' + m + '\n   Time: ' + t;
   }).join('\n\n');
   var msg = encodeURIComponent(
     'Internship Interview Reminders\n' +
@@ -1217,11 +1312,13 @@ function sendWAReminder(id) {
   var d  = new Date(iv.dt);
   var t  = isNaN(d) ? '--' : d.toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
   var dt = isNaN(d) ? '--' : d.toLocaleDateString('en-SG',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  var modeStr = iv.mode || 'Face to Face';
   var msg = encodeURIComponent(
     'Internship Interview Reminder\n\n' +
     'Student : ' + iv.name    + '\n' +
     'Class   : ' + iv.cls     + '\n' +
     'Company : ' + iv.company + '\n' +
+    'Mode    : ' + modeStr    + '\n' +
     'Time    : ' + t           + '\n' +
     'Date    : ' + dt          + '\n\n' +
     'Please ensure the student is informed and prepared.');
@@ -1242,6 +1339,21 @@ function toast(msg) {
 
 document.getElementById('ov').addEventListener('click', function(e) {
   if (e.target === e.currentTarget) closeMod();
+});
+
+// Delegated event listeners for student table buttons
+// Using data-idx avoids special-character issues in inline onclick attributes
+document.getElementById('sb').addEventListener('click', function(e) {
+  var editBtn  = e.target.closest('.stu-edit');
+  var placeBtn = e.target.closest('.stu-place');
+  if (editBtn) {
+    var idx = decodeURIComponent(editBtn.getAttribute('data-idx'));
+    openES(idx);
+  }
+  if (placeBtn) {
+    var idx = decodeURIComponent(placeBtn.getAttribute('data-idx'));
+    markPlaced(idx);
+  }
 });
 
 // ============================================================
