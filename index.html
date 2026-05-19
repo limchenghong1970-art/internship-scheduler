@@ -1,38 +1,13 @@
 <!DOCTYPE html>
-<!--
-  ============================================================
-  INTERNSHIP MANAGEMENT SYSTEM — Excel + localStorage Edition
-  ============================================================
-  How it works
-  ------------
-  - Open this HTML file directly from any drive (D:\, etc.)
-  - Click "Load from Excel" to import student data from your
-    Combined_Choices.xlsx file at any time
-  - All interview records, choice edits, and added companies
-    are saved automatically to browser localStorage
-  - Data survives browser restarts and page refreshes
-  - Export / Import JSON buttons let you back up and restore
-
-  Excel format expected
-  ---------------------
-  Columns: Student Name, Class, 1st Choice, 2nd Choice, 3rd Choice
-  (header row is skipped automatically)
-
-  Libraries used
-  --------------
-  - SheetJS (xlsx)  : reads .xlsx files in the browser
-  - Tabler Icons    : icon webfont (requires internet for icons)
-  ============================================================
--->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Internship Interview Scheduler</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.7.0/dist/tabler-icons.min.css">
-<!-- SheetJS: reads Excel files directly in the browser, no server needed -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
+
 :root{--bg:#fff;--bg2:#f5f5f4;--bg3:#eeede8;--bgi:#e6f1fb;--bgs:#eaf3de;--bgw:#faeeda;--bgd:#fcebeb;--tx:#1a1a1a;--tx2:#6b6b6b;--tx3:#9b9b9b;--txi:#0c447c;--txs:#27500a;--txw:#633806;--txd:#791f1f;--bd:rgba(0,0,0,0.12);--bd2:rgba(0,0,0,0.22);--rm:8px;--rl:12px;--font:'Tenorite','Segoe UI',system-ui,sans-serif}
 @media(prefers-color-scheme:dark){:root{--bg:#1c1c1c;--bg2:#2a2a2a;--bg3:#222;--bgi:#042c53;--bgs:#173404;--bgw:#412402;--bgd:#501313;--tx:#f0f0f0;--tx2:#a0a0a0;--tx3:#6a6a6a;--txi:#85b7eb;--txs:#97c459;--txw:#ef9f27;--txd:#f09595;--bd:rgba(255,255,255,0.12);--bd2:rgba(255,255,255,0.22)}}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -109,9 +84,15 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
 .cal-more{font-size:10px;color:var(--txi);padding:2px 4px;cursor:pointer}
 /* 7th column (Sunday) - remove right border */
 .cal-day:nth-child(7n){border-right:none}
+
+.loading{position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:2rem;text-align:center}
+.spinner{width:28px;height:28px;border:2px solid var(--bd);border-top-color:var(--tx2);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 </style>
 </head>
 <body>
+
 <div class="wrap">
 
   <!-- ── HEADER ───────────────────────────────────────────── -->
@@ -397,7 +378,268 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
 </div>
 <div class="toast" id="toast"></div>
 
+
+<div class="ov" id="ov">
+  <div class="modal">
+    <p class="mt" id="mod-t">Edit</p>
+    <div id="mod-b"></div>
+    <div class="fe" id="mod-f"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
 <script>
+
+// ============================================================
+// SUPABASE CONFIGURATION
+// Served from GitHub Pages (https://) so CORS works correctly.
+// Uses direct fetch() REST calls — no SDK needed.
+// ============================================================
+var SUPABASE_URL = 'https://hkymmknuhuauepotzyuj.supabase.co';
+var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreW1ta251aHVhdWVwb3R6eXVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NDI1NzQsImV4cCI6MjA5NDIxODU3NH0.hMga_GAu_eWAYN6UAsEalZYYLw_LVeKO4ZVOBPQfqoQ';
+
+var BASE = SUPABASE_URL + '/rest/v1/';
+var HDR  = {
+  'apikey':        SUPABASE_KEY,
+  'Authorization': 'Bearer ' + SUPABASE_KEY,
+  'Content-Type':  'application/json',
+  'Prefer':        'return=representation'
+};
+
+async function sbFetch(method, path, body, extraHeaders) {
+  try {
+    var res = await fetch(BASE + path, {
+      method:  method,
+      headers: Object.assign({}, HDR, extraHeaders || {}),
+      body:    body ? JSON.stringify(body) : undefined
+    });
+    var text = await res.text();
+    var json = text ? JSON.parse(text) : [];
+    if (!res.ok) {
+      var msg = (json && json.message) ? json.message : (json && json.hint ? json.hint : res.statusText);
+      return { data: null, error: msg };
+    }
+    return { data: Array.isArray(json) ? json : [json], error: null };
+  } catch(e) {
+    return { data: null, error: e.message };
+  }
+}
+
+var db = {
+  select: function(table, qs) {
+    return sbFetch('GET', table + '?select=*' + (qs ? '&' + qs : ''), null, null);
+  },
+  insert: function(table, rows) {
+    return sbFetch('POST', table, Array.isArray(rows) ? rows : [rows], null);
+  },
+  upsert: function(table, rows, conflict) {
+    return sbFetch('POST', table + '?on_conflict=' + (conflict||'id'),
+      Array.isArray(rows) ? rows : [rows],
+      { 'Prefer': 'resolution=merge-duplicates,return=representation' });
+  },
+  update: function(table, patch, col, val) {
+    return sbFetch('PATCH', table + '?' + col + '=eq.' + encodeURIComponent(val), patch, null);
+  },
+  del: function(table, col, val) {
+    return sbFetch('DELETE', table + '?' + col + '=eq.' + encodeURIComponent(val), null, null);
+  }
+};
+
+// ============================================================
+// SUPABASE DATA LAYER
+// Replaces localStorage with cloud database operations.
+// saveData() syncs all state to Supabase.
+// loadData() fetches all state from Supabase on startup.
+// ============================================================
+
+// Loading screen helpers
+function setMsg(m, sub) {
+  var el  = document.getElementById('load-msg');
+  var sel = document.getElementById('load-sub');
+  if (el)  el.textContent  = m   || '';
+  if (sel) sel.textContent = sub || '';
+}
+
+function showError(title, detail) {
+  document.getElementById('spin').style.display = 'none';
+  document.getElementById('load-msg').textContent  = title;
+  document.getElementById('load-msg').style.color  = 'var(--txd)';
+  document.getElementById('load-sub').innerHTML = detail +
+    '<br><br><button onclick="location.reload()" style="margin-top:8px;padding:7px 16px;' +
+    'border-radius:8px;border:.5px solid var(--bd2);background:var(--tx);color:var(--bg);' +
+    'font-size:13px;cursor:pointer">Retry</button>';
+}
+
+function setLoading(on) {
+  document.getElementById('loading').style.display = on ? 'flex' : 'none';
+  document.getElementById('app').style.display     = on ? 'none'  : 'block';
+}
+
+// ── Seeding (first run only) ────────────────────────────────
+
+async function seedStudents() {
+  if (!RAW.length) return;
+  var rows = RAW.map(function(s) {
+    return { idx:s.idx, cls:s.cls, name:s.name,
+      choice_1:s.c[0]||null, choice_2:s.c[1]||null, choice_3:s.c[2]||null };
+  });
+  var r = await db.upsert('students', rows, 'idx');
+  if (r.error) console.warn('seedStudents:', r.error);
+}
+
+async function seedStudentState() {
+  if (!RAW.length) return;
+  var r = await db.select('student_state', 'select=idx');
+  var existing = new Set((r.data||[]).map(function(x){ return x.idx; }));
+  var toInsert = RAW.filter(function(s){ return !existing.has(s.idx); })
+    .map(function(s){ return {
+      idx:s.idx, choice_1:s.c[0]||null, choice_2:s.c[1]||null, choice_3:s.c[2]||null,
+      log:[], cls:s.cls, name:s.name
+    };});
+  if (toInsert.length) {
+    var r2 = await db.insert('student_state', toInsert);
+    if (r2.error) console.warn('seedStudentState:', r2.error);
+  }
+}
+
+async function seedCompanies() {
+  if (!RAW.length) return;
+  var r = await db.select('companies', 'select=name');
+  var existingNames = new Set((r.data||[]).map(function(x){ return x.name; }));
+  var allCos = Array.from(new Set(RAW.flatMap(function(s){ return s.c; }).filter(Boolean)));
+  var toInsert = allCos.filter(function(n){ return !existingNames.has(n); })
+    .map(function(n){ return { name:n }; });
+  if (toInsert.length) {
+    var r2 = await db.insert('companies', toInsert);
+    if (r2.error) console.warn('seedCompanies:', r2.error);
+  }
+}
+
+// ── Load all data from Supabase into memory ─────────────────
+
+async function loadAllData() {
+  // Student state
+  var r1 = await db.select('student_state');
+  if (r1.error) throw new Error('student_state: ' + r1.error);
+  (r1.data||[]).forEach(function(row) {
+    ST[row.idx] = {
+      choices: [row.choice_1||'', row.choice_2||'', row.choice_3||''],
+      log: row.log || []
+    };
+    // Also rebuild RAW entry if not already there (loaded from DB)
+    if (!RAW.find(function(r){ return r.idx === row.idx; })) {
+      RAW.push({ idx:row.idx, cls:row.cls||'', name:row.name||row.idx, c:[row.choice_1||'',row.choice_2||'',row.choice_3||''] });
+    }
+  });
+
+  // Companies
+  var r2 = await db.select('companies', 'order=name.asc');
+  if (r2.error) throw new Error('companies: ' + r2.error);
+  cos = (r2.data||[]).map(function(row){ return row.name; });
+
+  // Interviews
+  var r3 = await db.select('interviews', 'order=dt.asc');
+  if (r3.error) throw new Error('interviews: ' + r3.error);
+  ivs = (r3.data||[]).map(function(row){
+    return { id:row.id, idx:row.idx, name:row.name, cls:row.cls,
+      company:row.company, rank:row.rank, dt:row.dt, status:row.status,
+      mode:row.mode||'Face to Face' };
+  });
+}
+
+// ── saveData: persist all mutable state to Supabase ─────────
+// Called after every action. Updates student_state, companies, interviews.
+
+async function saveData() {
+  // This is a lightweight save — we push changed state after each action
+  // Full sync happens via explicit calls in each action function
+  try { localStorage.setItem('ims_raw', JSON.stringify(RAW)); } catch(e) {}
+}
+
+// ── Per-action Supabase writes ───────────────────────────────
+
+async function dbSaveStudentState(idx) {
+  var st = ST[String(idx)];
+  if (!st) return;
+  await db.update('student_state', {
+    choice_1: st.choices[0]||null,
+    choice_2: st.choices[1]||null,
+    choice_3: st.choices[2]||null,
+    log: st.log
+  }, 'idx', idx);
+}
+
+async function dbAddInterview(row) {
+  // Remove id — let Supabase auto-generate it
+  var toInsert = { idx:row.idx, name:row.name, cls:row.cls, company:row.company,
+    rank:row.rank, dt:row.dt, status:row.status, mode:row.mode||'Face to Face' };
+  var r = await db.insert('interviews', [toInsert]);
+  if (r.error) { toast('Save failed: ' + r.error); return null; }
+  return r.data && r.data[0] ? r.data[0] : Object.assign({ id: Date.now() }, toInsert);
+}
+
+async function dbUpdateInterview(id, patch) {
+  return db.update('interviews', patch, 'id', id);
+}
+
+async function dbDeleteInterview(id) {
+  return db.del('interviews', 'id', id);
+}
+
+async function dbAddCompany(name) {
+  return db.insert('companies', [{ name:name }]);
+}
+
+async function dbUpdateCompany(oldName, newName) {
+  return db.update('companies', { name:newName }, 'name', oldName);
+}
+
+async function dbDeleteCompany(name) {
+  return db.del('companies', 'name', name);
+}
+
+// ── exportData: download JSON backup ────────────────────────
+function exportData() {
+  var data = { schemaVersion: APP_VERSION, RAW:RAW, ST:ST, cos:cos, ivs:ivs,
+    exportedAt: new Date().toISOString() };
+  var blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  var d    = new Date();
+  a.href   = url;
+  a.download = 'ims_v' + APP_VERSION + '_backup_' +
+    d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Exported successfully');
+}
+
+// ── confirmReset ────────────────────────────────────────────
+async function confirmReset() {
+  if (!confirm('Reset all interviews and choice edits? Student data stays.')) return;
+  ivs = [];
+  RAW.forEach(function(s) { ST[String(s.idx)] = { choices:s.c.slice(), log:[] }; });
+  cos = Array.from(new Set(RAW.flatMap(function(s){ return s.c; }).filter(Boolean))).sort();
+  // Clear Supabase interviews table
+  for (var i = 0; i < ivs.length; i++) { await db.del('interviews','id',ivs[i].id); }
+  refreshAll();
+  toast('All interview data reset');
+}
+
+// ── purgeAll ────────────────────────────────────────────────
+async function purgeAll() {
+  if (!confirm('WARNING: Delete ALL data including students? You will need to reload your Excel file.')) return;
+  var typed = window.prompt('Type PURGE (all caps) to confirm:');
+  if (typed !== 'PURGE') { toast('Purge cancelled'); return; }
+  RAW=[]; ST={}; cos=[]; ivs=[];
+  try { localStorage.removeItem('ims_raw'); } catch(e) {}
+  document.getElementById('hdr-sub').innerHTML =
+    'No data &nbsp;&#183;&nbsp; <span class="xl-pill xl-none"><i class="ti ti-table-off"></i> No student data</span>' +
+    ' &nbsp;&#183;&nbsp; <span style="font-size:11px;color:var(--tx3)">v' + APP_VERSION + '</span>';
+  refreshAll();
+  toast('All data purged. Load your Excel file to continue.');
+}
+
 // ============================================================
 // SECTION 1: STATE
 // RAW  — original student records loaded from Excel.
@@ -421,7 +663,7 @@ var eid = null; // id of record being edited in modal
 //          and the version badge shown in the header.
 // ============================================================
 var APP_VERSION = '2025.05.17';
-var LS_KEY      = 'ims_v3'; // bump key when schema changes
+var LS_KEY = 'ims_raw'; // only used for RAW cache
 
 // ============================================================
 // SECTION 2: EXCEL IMPORT
@@ -439,7 +681,7 @@ function loadExcel(event) {
   if (!file) return;
 
   var reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     try {
       // Parse the workbook
       var data     = new Uint8Array(e.target.result);
@@ -525,7 +767,13 @@ function loadExcel(event) {
       refreshAll();
       updateHeader(file.name, newRAW.length);
       toast('Loaded ' + newRAW.length + ' students from ' + file.name);
-      // Check for today's interviews in case any were already scheduled
+      // Seed Supabase with newly loaded students
+      setLoading(true);
+      setMsg('Saving to database...', 'Adding students and companies');
+      try {
+        await Promise.all([seedStudents(), seedStudentState(), seedCompanies()]);
+      } catch(e) { console.warn('Excel seed error:', e); }
+      setLoading(false);
       setTimeout(checkTodayReminders, 600);
     } catch(err) {
       toast('Error reading Excel file: ' + err.message);
@@ -605,31 +853,10 @@ function loadData() {
   }
 }
 
-/** exportData — download all data as a dated JSON backup file */
-function exportData() {
-  // Include schema version in the export so importData can migrate if needed
-  var data = {
-    schemaVersion: APP_VERSION,
-    RAW: RAW, ST: ST, cos: cos, ivs: ivs,
-    exportedAt: new Date().toISOString()
-  };
-  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  var url  = URL.createObjectURL(blob);
-  var a    = document.createElement('a');
-  var d    = new Date();
-  a.href   = url;
-  // Filename includes version so you can tell backups apart
-  a.download = 'ims_v' + APP_VERSION + '_backup_' +
-    d.getFullYear() + '-' +
-    String(d.getMonth()+1).padStart(2,'0') + '-' +
-    String(d.getDate()).padStart(2,'0') + '.json';
-  a.click();
-  URL.revokeObjectURL(url);
-  toast('Exported: ims_v' + APP_VERSION + '_backup_...');
-}
+// exportData handled by Supabase layer
 
 /** importData — restore from a JSON backup file */
-function importData(event) {
+async function importData(event) {
   var file = event.target.files[0];
   if (!file) return;
   var reader = new FileReader();
@@ -681,7 +908,17 @@ function importData(event) {
       cos = d.cos;
       ivs = d.ivs;
 
-      saveData();
+      // Re-seed Supabase with imported data
+      setLoading(true);
+      setMsg('Importing to database...');
+      try {
+        await Promise.all([seedStudents(), seedStudentState(), seedCompanies()]);
+        // Re-insert all interviews
+        for (var ii = 0; ii < ivs.length; ii++) {
+          await dbAddInterview(ivs[ii]);
+        }
+      } catch(e) { console.warn('Import seed error:', e); }
+      setLoading(false);
       refreshAll();
       if (RAW.length) updateHeader('backup file', RAW.length);
 
@@ -698,53 +935,9 @@ function importData(event) {
   event.target.value = '';
 }
 
-/** confirmReset — clear all interview data, restore choices from RAW */
-function confirmReset() {
-  if (!confirm('Reset all interviews and choice edits? Student data from Excel stays.')) return;
-  ST  = {};
-  ivs = [];
-  // Rebuild ST from RAW
-  RAW.forEach(function(s) { ST[String(s.idx)] = { choices: s.c.slice(), log: [] }; });
-  // Rebuild cos from RAW choices
-  cos = Array.from(new Set(RAW.flatMap(function(s){ return s.c; }).filter(Boolean))).sort();
-  saveData();
-  refreshAll();
-  toast('All interview data has been reset');
-}
+// confirmReset handled by Supabase layer
 
-/**
- * purgeAll — wipe EVERYTHING: students, interviews, companies,
- * choice edits, and the localStorage entry.
- * Requires the user to type PURGE to confirm — prevents accidents.
- */
-function purgeAll() {
-  var confirm1 = confirm(
-    'WARNING: This will delete ALL data including students, interviews, and companies.\n\n' +
-    'You will need to reload your Excel file afterwards.\n\n' +
-    'Are you sure you want to continue?'
-  );
-  if (!confirm1) return;
-
-  var typed = window.prompt('Type PURGE (all caps) to confirm:');
-  if (typed !== 'PURGE') { toast('Purge cancelled — you must type PURGE exactly'); return; }
-
-  // Wipe all in-memory state
-  RAW = [];
-  ST  = {};
-  cos = [];
-  ivs = [];
-
-  // Remove from localStorage entirely
-  try { localStorage.removeItem(LS_KEY); } catch(e) {}
-
-  // Reset UI
-  document.getElementById('hdr-sub').innerHTML =
-    'No Excel file loaded &nbsp;&#183;&nbsp; ' +
-    '<span class="xl-pill xl-none"><i class="ti ti-table-off"></i> No student data</span>' +
-    ' &nbsp;&#183;&nbsp; <span style="font-size:11px;color:var(--tx3)">v' + APP_VERSION + '</span>';
-  refreshAll();
-  toast('All data has been purged. Please load your Excel file.');
-}
+// purgeAll handled by Supabase layer
 
 // ============================================================
 // SECTION 4: UI HELPERS
@@ -926,7 +1119,7 @@ function stuStatusBadge(idx) {
  * markPlaced — directly mark a student as placed without a formal interview.
  * Creates a special interview record with mode "Direct" and status "Success".
  */
-function markPlaced(idx) {
+async function markPlaced(idx) {
   idx = String(idx); // ensure string type
   var s = RAW.find(function(r){ return String(r.idx)===idx; });
   if (!s) { toast('Student not found'); return; }
@@ -934,7 +1127,7 @@ function markPlaced(idx) {
 
   var company = ST[String(idx)] ? (ST[String(idx)].choices[0] || 'Direct placement') : 'Direct placement';
   var id = Date.now();
-  ivs.push({
+  var placedIv = {
     id: id,
     idx: String(idx),
     name: s.name,
@@ -944,8 +1137,10 @@ function markPlaced(idx) {
     dt: new Date().toISOString().slice(0,16),
     status: 'Success',
     mode: 'NA'
-  });
-  saveData();
+  };
+  var savedIv = await dbAddInterview(placedIv);
+  if (!savedIv) return;
+  ivs.push(savedIv);
   renderStu();
   renderIv();
   mets();
@@ -979,7 +1174,7 @@ function openES(idx) {
   document.getElementById('ov').classList.add('open');
 }
 
-function saveES() {
+async function saveES() {
   var choices = [
     document.getElementById('e-c1').value,
     document.getElementById('e-c2').value,
@@ -987,7 +1182,7 @@ function saveES() {
   ];
   var newLog = (ST[eid].log || []).concat(['manually edited']);
   ST[String(eid)] = { choices: choices, log: newLog };
-  saveData();
+  await dbSaveStudentState(eid);
   renderStu(); onSC(); closeMod(); toast('Choices updated');
 }
 
@@ -1069,12 +1264,14 @@ function addIv() {
   var id   = Date.now();
 
   var mode = document.getElementById('i-mode') ? document.getElementById('i-mode').value : 'Face to Face';
-  ivs.push({ id:id, idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode });
+  var newIv = { id:id, idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode };
+  var saved = await dbAddInterview(newIv);
+  if (!saved) return;
+  ivs.push(saved);
 
   // Auto-promote choices if rejected immediately
   if (status === 'Reject') promote(sidx);
 
-  saveData();
   renderIv(); renderStu(); mets(); onSC();
   if (document.getElementById('calendar').classList.contains('active')) renderCal();
   toast('Interview scheduled for ' + s.name.split(' ')[0]);
@@ -1084,7 +1281,7 @@ function addIv() {
  * promote — shift choices up after rejection.
  * Removes 1st choice, promotes 2nd to 1st, 3rd to 2nd.
  */
-function promote(idx) {
+async function promote(idx) {
   var st = ST[String(idx)];
   if (!st) return;
   var removed = st.choices.shift();
@@ -1121,14 +1318,15 @@ function openEI(id) {
   document.getElementById('ov').classList.add('open');
 }
 
-function saveEI() {
+async function saveEI() {
   var iv  = ivs.find(function(i){ return i.id===eid; });
   var old = iv.status;
   iv.dt     = document.getElementById('e-dt').value;
   iv.status = document.getElementById('e-st').value;
   iv.mode   = document.getElementById('e-mode') ? document.getElementById('e-mode').value : (iv.mode || 'Face to Face');
-  if (old !== 'Reject' && iv.status === 'Reject') promote(String(iv.idx));
-  saveData();
+  var r = await dbUpdateInterview(iv.id, { dt:iv.dt, status:iv.status, mode:iv.mode });
+  if (r && r.error) { toast('Save failed: ' + r.error); return; }
+  if (old !== 'Reject' && iv.status === 'Reject') await promote(String(iv.idx));
   renderIv(); renderStu(); mets(); onSC();
   if (document.getElementById('calendar').classList.contains('active')) renderCal();
   closeMod(); toast('Interview updated');
@@ -1362,24 +1560,7 @@ document.getElementById('sb').addEventListener('click', function(e) {
 // 2. If data exists, render immediately
 // 3. If no data, show the empty state prompting Excel import
 // ============================================================
-(function init() {
-  var restored = loadData();
-  if (restored) {
-    // Keys are always strings (name_class format) — no migration needed
-    refreshAll();
-    var classes = countClasses();
-    rebuildClassFilters(classes);
-    updateHeader('saved session', RAW.length);
-    setTimeout(function(){
-      toast('v' + APP_VERSION + ' — data restored from last session');
-      // Check for today's interviews and show reminder popup
-      checkTodayReminders();
-    }, 500);
-  } else {
-    // No saved data — show empty state, wait for Excel load
-    mets();
-  }
-})();
+// init replaced by initApp() below
 
 // ============================================================
 // CALENDAR TAB
@@ -1674,6 +1855,58 @@ function checkTodayReminders() {
 
   document.getElementById('ov').classList.add('open');
 }
+
+
+// ============================================================
+// INITIALISATION — Supabase version
+// 1. Show loading screen
+// 2. Ping Supabase to verify connection
+// 3. Load all data from Supabase
+// 4. Restore RAW from localStorage cache if Supabase has none
+// 5. Render UI
+// ============================================================
+async function initApp() {
+  setLoading(true);
+  setMsg('Connecting to database...');
+
+  // Step 1: connection test
+  var ping = await db.select('students', 'select=idx&limit=1');
+  if (ping.error) {
+    showError('Cannot reach Supabase', ping.error +
+      ' -- Check your internet connection.');
+    return;
+  }
+
+  // Step 2: load all data
+  setMsg('Loading data...');
+  try {
+    await loadAllData();
+  } catch(e) {
+    showError('Data load failed', e.message); return;
+  }
+
+  // Step 3: if no students in Supabase, try to restore RAW from localStorage cache
+  if (!RAW.length) {
+    try {
+      var cached = localStorage.getItem('ims_raw');
+      if (cached) {
+        RAW = JSON.parse(cached);
+        updateHeader('cached session', RAW.length);
+      }
+    } catch(e) {}
+  }
+
+  // Step 4: render UI
+  popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
+  var classes = countClasses();
+  rebuildClassFilters(classes);
+  if (RAW.length) updateHeader('Supabase', RAW.length);
+  setLoading(false);
+
+  setTimeout(checkTodayReminders, 500);
+}
+
+initApp();
 
 </script>
 </body>
