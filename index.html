@@ -581,9 +581,18 @@ async function dbSaveStudentState(idx) {
 }
 
 async function dbAddInterview(row) {
-  // Remove id — let Supabase auto-generate it
-  var toInsert = { idx:row.idx, name:row.name, cls:row.cls, company:row.company,
-    rank:row.rank, dt:row.dt, status:row.status, mode:row.mode||'Face to Face' };
+  // Always strip id — Supabase auto-generates bigint identity id
+  // Explicitly list all fields to avoid sending id accidentally
+  var toInsert = {
+    idx:     row.idx,
+    name:    row.name,
+    cls:     row.cls,
+    company: row.company,
+    rank:    row.rank    || 1,
+    dt:      row.dt,
+    status:  row.status  || 'Pending',
+    mode:    row.mode    || 'Face to Face'
+  };
   var r = await db.insert('interviews', [toInsert]);
   if (r.error) { toast('Save failed: ' + r.error); return null; }
   return r.data && r.data[0] ? r.data[0] : Object.assign({ id: Date.now() }, toInsert);
@@ -918,8 +927,13 @@ async function importData(event) {
       try {
         await Promise.all([seedStudents(), seedStudentState(), seedCompanies()]);
         // Re-insert all interviews
+        // Strip id field — Supabase auto-generates it
         for (var ii = 0; ii < ivs.length; ii++) {
-          await dbAddInterview(ivs[ii]);
+          var iv = Object.assign({}, ivs[ii]);
+          delete iv.id;
+          var saved = await dbAddInterview(iv);
+          // Update local id with the Supabase-generated one
+          if (saved) ivs[ii].id = saved.id;
         }
         toast('Import complete!');
       } catch(e) {
@@ -1135,7 +1149,6 @@ async function markPlaced(idx) {
   var company = ST[String(idx)] ? (ST[String(idx)].choices[0] || 'Direct placement') : 'Direct placement';
   var id = Date.now();
   var placedIv = {
-    id: id,
     idx: String(idx),
     name: s.name,
     cls: s.cls,
