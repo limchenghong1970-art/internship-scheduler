@@ -682,17 +682,12 @@ function loadExcel(event) {
 
   toast('Reading file: ' + file.name);
 
-  var reader = new FileReader();
-
-  reader.onerror = function() {
-    toast('Error reading file: ' + reader.error);
-  };
-
-  reader.onload = function(e) {
+  // Use file.arrayBuffer() instead of FileReader — avoids Chrome extension interference
+  file.arrayBuffer().then(function(buffer) {
     // Step 1: Parse Excel
     var newRAW = [];
     try {
-      var data     = new Uint8Array(e.target.result);
+      var data     = new Uint8Array(buffer);
       var workbook = XLSX.read(data, { type: 'array' });
       var sheet    = workbook.Sheets[workbook.SheetNames[0]];
       var rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
@@ -773,9 +768,12 @@ function loadExcel(event) {
         toast('Warning: DB seed failed - ' + err.message);
         console.warn('Seed error:', err);
       });
-  };
 
-  reader.readAsArrayBuffer(file);
+  }).catch(function(err) {
+    toast('Could not read file: ' + err.message);
+    console.error('arrayBuffer error:', err);
+  });
+
   event.target.value = '';
 }
 
