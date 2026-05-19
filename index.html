@@ -856,7 +856,7 @@ async function importData(event) {
   var file = event.target.files[0];
   if (!file) return;
   var reader = new FileReader();
-  reader.onload = function(ev) {
+  reader.onload = async function(ev) {
     try {
       var d = JSON.parse(ev.target.result);
 
@@ -1248,7 +1248,7 @@ function renderIv() {
   }).join('');
 }
 
-function addIv() {
+async function addIv() {
   var sidx    = String(document.getElementById('i-stu').value); // string key
   var company = document.getElementById('i-co').value;
   var dt      = document.getElementById('i-dt').value;
@@ -1330,7 +1330,7 @@ async function saveEI() {
   closeMod(); toast('Interview updated');
 }
 
-function delIv(id) {
+async function delIv(id) {
   if (!confirm('Delete this interview record?')) return;
   ivs = ivs.filter(function(i){ return i.id !== id; });
   saveData();
@@ -1358,7 +1358,7 @@ function renderCos() {
   }).join('');
 }
 
-function addCo() {
+async function addCo() {
   var v = document.getElementById('new-co').value.trim();
   if (!v) { toast('Enter a company name'); return; }
   if (cos.includes(v)) { toast('Company already exists'); return; }
@@ -1379,7 +1379,7 @@ function openEC(i) {
   document.getElementById('ov').classList.add('open');
 }
 
-function saveEC() {
+async function saveEC() {
   var v = document.getElementById('e-cn').value.trim();
   if (!v) { toast('Name cannot be empty'); return; }
   var old = cos[eid];
@@ -1396,7 +1396,7 @@ function saveEC() {
   renderCos(); renderStu(); renderIv(); popCoFil(); closeMod(); toast('Company renamed');
 }
 
-function delCo(i) {
+async function delCo(i) {
   if (!confirm('Remove "' + cos[i] + '" from the list?')) return;
   var name = cos[i];
   cos.splice(i, 1);
