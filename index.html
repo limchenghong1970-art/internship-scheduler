@@ -678,55 +678,48 @@ var LS_KEY = 'ims_raw'; // only used for RAW cache
  */
 function loadExcel(event) {
   var file = event.target.files[0];
-  if (!file) return;
+  if (!file) { toast('No file selected'); return; }
+
+  toast('Reading file: ' + file.name);
 
   var reader = new FileReader();
-  reader.onload = async function(e) {
+
+  reader.onerror = function() {
+    toast('Error reading file: ' + reader.error);
+  };
+
+  reader.onload = function(e) {
+    // Step 1: Parse Excel
+    var newRAW = [];
     try {
-      // Parse the workbook
       var data     = new Uint8Array(e.target.result);
       var workbook = XLSX.read(data, { type: 'array' });
+      var sheet    = workbook.Sheets[workbook.SheetNames[0]];
+      var rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-      // Use the first sheet
-      var sheetName = workbook.SheetNames[0];
-      var sheet     = workbook.Sheets[sheetName];
+      if (!rows || rows.length < 2) {
+        toast('Excel file appears empty or has only a header row');
+        return;
+      }
 
-      // Convert to array of arrays (raw rows)
-      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-      // Skip header row, parse each student row
-      // Expected: [Student Name, Class, 1st Choice, 2nd Choice, 3rd Choice]
-      var newRAW = [];
-      // Detect column layout from header row.
-      // Supported formats:
-      //   A) Index | Class | Fullname | 1st | 2nd | 3rd  (your current file)
-      //   B) Fullname | Class | 1st | 2nd | 3rd           (no index column)
-      //   C) Index | Fullname | Class | 1st | 2nd | 3rd   (index then name)
-      //
-      // Detection logic: read the header row and find which columns hold
-      // the name, class, and choices by matching known header keywords.
-
+      // Detect columns from header row
       var headerRow = rows[0] || [];
       var colName = -1, colCls = -1, colC1 = -1, colC2 = -1, colC3 = -1;
-
       for (var h = 0; h < headerRow.length; h++) {
         var hdr = String(headerRow[h] || '').trim().toLowerCase();
-        if (hdr === 'fullname' || hdr === 'name' || hdr === 'student name' || hdr === 'student') colName = h;
-        else if (hdr === 'class' || hdr === 'cls') colCls = h;
+        if (['fullname','name','student name','student'].indexOf(hdr) !== -1) colName = h;
+        else if (['class','cls'].indexOf(hdr) !== -1) colCls = h;
         else if (hdr.indexOf('1st') !== -1) colC1 = h;
         else if (hdr.indexOf('2nd') !== -1) colC2 = h;
         else if (hdr.indexOf('3rd') !== -1) colC3 = h;
       }
 
-      // Fallback: if header detection failed, guess based on whether col 0 is numeric
+      // Fallback column detection
       if (colName === -1) {
         var firstData = rows.length > 1 ? rows[1][0] : '';
-        var hasIndex  = !isNaN(Number(firstData)) && firstData !== '';
-        if (hasIndex) {
-          // Index | Class | Name | c1 | c2 | c3
+        if (!isNaN(Number(firstData)) && firstData !== '') {
           colCls = 1; colName = 2; colC1 = 3; colC2 = 4; colC3 = 5;
         } else {
-          // Name | Class | c1 | c2 | c3
           colName = 0; colCls = 1; colC1 = 2; colC2 = 3; colC3 = 4;
         }
       }
@@ -738,54 +731,52 @@ function loadExcel(event) {
         var c1   = String(row[colC1]   || '').trim();
         var c2   = String(row[colC2]   || '').trim();
         var c3   = String(row[colC3]   || '').trim();
-        if (!name) continue; // skip blank rows
-        // Stable unique key: name + class combination
-        var idx = name + '_' + cls;
-        newRAW.push({ idx: idx, cls: cls, name: name, c: [c1, c2, c3] });
+        if (!name) continue;
+        newRAW.push({ idx: name + '_' + cls, cls: cls, name: name, c: [c1, c2, c3] });
       }
-
-      if (newRAW.length === 0) {
-        toast('No student rows found. Check the Excel column order.');
-        return;
-      }
-
-      // If students already exist in ST, preserve their state
-      // New students get default state from their Excel choices
-      newRAW.forEach(function(s) {
-        if (!ST[String(s.idx)]) {
-          ST[String(s.idx)] = { choices: s.c.slice(), log: [] };
-        }
-      });
-
-      // Rebuild companies list from all choices (merge with existing cos)
-      var xlCos = Array.from(new Set(newRAW.flatMap(function(s){ return s.c; }).filter(Boolean)));
-      xlCos.forEach(function(c) { if (!cos.includes(c)) cos.push(c); });
-      cos.sort();
-
-      RAW = newRAW;
-      // Cache RAW locally so it survives page refresh
-      try { localStorage.setItem('ims_raw', JSON.stringify(RAW)); } catch(e) {}
-
-      // Seed Supabase first, then refresh UI
-      toast('Saving ' + newRAW.length + ' students to database...');
-      try {
-        await Promise.all([seedStudents(), seedStudentState(), seedCompanies()]);
-        toast('Saved successfully!');
-      } catch(e) {
-        console.warn('Excel seed error:', e);
-        toast('Warning: could not save to database. ' + e.message);
-      }
-
-      refreshAll();
-      updateHeader(file.name, newRAW.length);
-      setTimeout(checkTodayReminders, 600);
-    } catch(err) {
-      toast('Error reading Excel file: ' + err.message);
-      console.error(err);
+    } catch(parseErr) {
+      toast('Excel parse error: ' + parseErr.message);
+      console.error('Excel parse error:', parseErr);
+      return;
     }
+
+    if (newRAW.length === 0) {
+      toast('No student rows found. Check column headers in Excel.');
+      return;
+    }
+
+    toast('Parsed ' + newRAW.length + ' students. Saving to database...');
+
+    // Step 2: Update in-memory state
+    newRAW.forEach(function(s) {
+      if (!ST[s.idx]) ST[s.idx] = { choices: s.c.slice(), log: [] };
+    });
+    var xlCos = Array.from(new Set(newRAW.flatMap(function(s){ return s.c; }).filter(Boolean)));
+    xlCos.forEach(function(c){ if (!cos.includes(c)) cos.push(c); });
+    cos.sort();
+    RAW = newRAW;
+
+    // Cache RAW locally
+    try { localStorage.setItem('ims_raw', JSON.stringify(RAW)); } catch(e) {}
+
+    // Step 3: Update UI immediately (don't wait for Supabase)
+    refreshAll();
+    updateHeader(file.name, newRAW.length);
+
+    // Step 4: Seed Supabase in the background (non-blocking)
+    Promise.all([seedStudents(), seedStudentState(), seedCompanies()])
+      .then(function() {
+        toast('All ' + newRAW.length + ' students saved to database!');
+        setTimeout(checkTodayReminders, 600);
+      })
+      .catch(function(err) {
+        toast('Warning: DB seed failed - ' + err.message);
+        console.warn('Seed error:', err);
+      });
   };
+
   reader.readAsArrayBuffer(file);
-  event.target.value = ''; // reset so same file can be re-loaded
+  event.target.value = '';
 }
 
 /**
