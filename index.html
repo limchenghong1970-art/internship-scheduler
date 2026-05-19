@@ -763,17 +763,21 @@ function loadExcel(event) {
       cos.sort();
 
       RAW = newRAW;
-      saveData();
-      refreshAll();
-      updateHeader(file.name, newRAW.length);
-      toast('Loaded ' + newRAW.length + ' students from ' + file.name);
-      // Seed Supabase with newly loaded students
-      setLoading(true);
-      setMsg('Saving to database...', 'Adding students and companies');
+      // Cache RAW locally so it survives page refresh
+      try { localStorage.setItem('ims_raw', JSON.stringify(RAW)); } catch(e) {}
+
+      // Seed Supabase first, then refresh UI
+      toast('Saving ' + newRAW.length + ' students to database...');
       try {
         await Promise.all([seedStudents(), seedStudentState(), seedCompanies()]);
-      } catch(e) { console.warn('Excel seed error:', e); }
-      setLoading(false);
+        toast('Saved successfully!');
+      } catch(e) {
+        console.warn('Excel seed error:', e);
+        toast('Warning: could not save to database. ' + e.message);
+      }
+
+      refreshAll();
+      updateHeader(file.name, newRAW.length);
       setTimeout(checkTodayReminders, 600);
     } catch(err) {
       toast('Error reading Excel file: ' + err.message);
@@ -909,16 +913,18 @@ async function importData(event) {
       ivs = d.ivs;
 
       // Re-seed Supabase with imported data
-      setLoading(true);
-      setMsg('Importing to database...');
+      toast('Importing to database...');
       try {
         await Promise.all([seedStudents(), seedStudentState(), seedCompanies()]);
         // Re-insert all interviews
         for (var ii = 0; ii < ivs.length; ii++) {
           await dbAddInterview(ivs[ii]);
         }
-      } catch(e) { console.warn('Import seed error:', e); }
-      setLoading(false);
+        toast('Import complete!');
+      } catch(e) {
+        console.warn('Import seed error:', e);
+        toast('Warning: ' + e.message);
+      }
       refreshAll();
       if (RAW.length) updateHeader('backup file', RAW.length);
 
