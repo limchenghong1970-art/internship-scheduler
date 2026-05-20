@@ -413,22 +413,34 @@ var BASE = SUPABASE_URL + '/rest/v1/';
 var HDR  = {
   'apikey':        SUPABASE_KEY,
   'Authorization': 'Bearer ' + SUPABASE_KEY,
-  'Content-Type':  'application/json',
-  'Prefer':        'return=representation'
+  'Content-Type':  'application/json'
+  // Prefer header set per-request to avoid conflicts with identity columns
 };
 
 async function sbFetch(method, path, body, extraHeaders) {
   try {
+    // Set Prefer header based on method:
+    // GET: no Prefer needed
+    // POST/PATCH: return=representation to get back the saved row
+    // DELETE: return=minimal
+    var preferHeader = {};
+    if (method === 'POST' || method === 'PATCH') {
+      preferHeader = { 'Prefer': 'return=representation' };
+    }
     var res = await fetch(BASE + path, {
       method:  method,
-      headers: Object.assign({}, HDR, extraHeaders || {}),
+      headers: Object.assign({}, HDR, preferHeader, extraHeaders || {}),
       body:    body ? JSON.stringify(body) : undefined
     });
     var text = await res.text();
     var json = text ? JSON.parse(text) : [];
     if (!res.ok) {
-      var msg = (json && json.message) ? json.message : (json && json.hint ? json.hint : res.statusText);
-      return { data: null, error: msg };
+      var errObj = Array.isArray(json) ? json[0] : json;
+      var msg = (errObj && errObj.message) ? errObj.message : res.statusText;
+      var hint = (errObj && errObj.hint) ? ' | Hint: ' + errObj.hint : '';
+      var detail = (errObj && errObj.details) ? ' | ' + errObj.details : '';
+      console.error('Supabase error [' + method + ' ' + path + ']:', errObj);
+      return { data: null, error: msg + hint + detail };
     }
     return { data: Array.isArray(json) ? json : [json], error: null };
   } catch(e) {
@@ -446,7 +458,7 @@ var db = {
   upsert: function(table, rows, conflict) {
     return sbFetch('POST', table + '?on_conflict=' + (conflict||'id'),
       Array.isArray(rows) ? rows : [rows],
-      { 'Prefer': 'resolution=merge-duplicates,return=representation' });
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
   },
   update: function(table, patch, col, val) {
     return sbFetch('PATCH', table + '?' + col + '=eq.' + encodeURIComponent(val), patch, null);
@@ -531,7 +543,14 @@ async function seedCompanies() {
 async function loadAllData() {
   // Student state
   var r1 = await db.select('student_state');
-  if (r1.error) throw new Error('student_state: ' + r1.error);
+  if (r1.error) {
+    // Try localStorage fallback
+    try {
+      var stCache = localStorage.getItem('ims_st_cache');
+      if (stCache) ST = JSON.parse(stCache);
+    } catch(e) {}
+    throw new Error('student_state: ' + r1.error);
+  }
   (r1.data||[]).forEach(function(row) {
     ST[row.idx] = {
       choices: [row.choice_1||'', row.choice_2||'', row.choice_3||''],
@@ -556,10 +575,21 @@ async function loadAllData() {
       company:row.company, rank:row.rank, dt:row.dt, status:row.status,
       mode:row.mode||'Face to Face' };
   });
-  // Only overwrite local ivs if Supabase returned data
-  // Prevents data loss if Supabase is temporarily empty
-  if (loaded.length > 0 || ivs.length === 0) {
+  // Use Supabase data if it has records
+  // If Supabase returns empty but we have local cache, keep local
+  if (loaded.length > 0) {
     ivs = loaded;
+    // Cache to localStorage as fallback
+    try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
+  } else if (ivs.length === 0) {
+    // Try restoring from localStorage cache
+    try {
+      var cached = localStorage.getItem('ims_ivs_cache');
+      if (cached) {
+        ivs = JSON.parse(cached);
+        console.log('Restored ' + ivs.length + ' interviews from local cache');
+      }
+    } catch(e) {}
   }
 }
 
@@ -567,9 +597,12 @@ async function loadAllData() {
 // Called after every action. Updates student_state, companies, interviews.
 
 async function saveData() {
-  // This is a lightweight save — we push changed state after each action
-  // Full sync happens via explicit calls in each action function
-  try { localStorage.setItem('ims_raw', JSON.stringify(RAW)); } catch(e) {}
+  // Cache key state to localStorage as fallback for Supabase outages
+  try {
+    localStorage.setItem('ims_raw', JSON.stringify(RAW));
+    localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs));
+    localStorage.setItem('ims_st_cache', JSON.stringify(ST));
+  } catch(e) {}
 }
 
 // ── Per-action Supabase writes ───────────────────────────────
@@ -1152,7 +1185,7 @@ async function markPlaced(idx) {
   if (!confirm('Mark ' + s.name + ' as placed directly (no interview)?')) return;
 
   var company = ST[String(idx)] ? (ST[String(idx)].choices[0] || 'Direct placement') : 'Direct placement';
-  var id = Date.now();
+  // No id — Supabase generates it automatically
   var placedIv = {
     idx: String(idx),
     name: s.name,
@@ -1286,10 +1319,10 @@ async function addIv() {
   var s    = RAW.find(function(r){ return String(r.idx)===sidx; });
   if (!s)  { toast('Student not found'); return; }
   var rank = (ST[sidx] ? ST[sidx].choices.indexOf(company) + 1 : 0) || 1;
-  var id   = Date.now();
 
   var mode = document.getElementById('i-mode') ? document.getElementById('i-mode').value : 'Face to Face';
-  var newIv = { id:id, idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode };
+  // Do NOT include id — Supabase generates it automatically (bigint identity)
+  var newIv = { idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode };
   var saved = await dbAddInterview(newIv);
   if (!saved) return;
   ivs.push(saved);
@@ -1297,6 +1330,8 @@ async function addIv() {
   // Auto-promote choices if rejected immediately
   if (status === 'Reject') promote(sidx);
 
+  // Cache locally as fallback
+  try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
   renderIv(); renderStu(); mets(); onSC();
   if (document.getElementById('calendar').classList.contains('active')) renderCal();
   toast('Interview scheduled for ' + s.name.split(' ')[0]);
