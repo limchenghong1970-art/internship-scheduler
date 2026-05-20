@@ -2050,6 +2050,24 @@ async function initApp() {
   // Step 3: Load data with individual step timeouts
   setMsg('Loading students...');
   try {
+    // Load students table first — this has reliable name + cls columns
+    var rStu = await withTimeout(db.select('students', 'select=idx,name,cls,choice_1,choice_2,choice_3'), 8000, 'students');
+    if (!rStu.error && rStu.data && rStu.data.length) {
+      rStu.data.forEach(function(row) {
+        if (!RAW.find(function(r){ return String(r.idx)===String(row.idx); })) {
+          RAW.push({
+            idx: row.idx,
+            cls: row.cls || '',
+            name: row.name || row.idx,
+            c: [row.choice_1||'', row.choice_2||'', row.choice_3||'']
+          });
+        }
+      });
+    }
+  } catch(e) { console.warn('students load timeout:', e.message); }
+
+  try {
+    // Then load student_state for current choices and logs
     var r1 = await withTimeout(db.select('student_state'), 8000, 'student_state');
     if (!r1.error) {
       (r1.data||[]).forEach(function(row) {
@@ -2057,6 +2075,7 @@ async function initApp() {
           choices: [row.choice_1||'', row.choice_2||'', row.choice_3||''],
           log: row.log || []
         };
+        // Only add to RAW if still missing after students table load
         if (!RAW.find(function(r){ return String(r.idx)===String(row.idx); })) {
           var namePart = row.name || String(row.idx).split('_')[0];
           var clsPart  = row.cls  || String(row.idx).split('_')[1] || '';
