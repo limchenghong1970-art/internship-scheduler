@@ -93,13 +93,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
 </head>
 <body>
 
-<div class="loading" id="loading">
-  <div class="spinner" id="spin"></div>
-  <p id="load-msg" style="font-size:14px;color:var(--tx2)">Connecting to database...</p>
-  <p id="load-sub" style="font-size:12px;color:var(--tx3);max-width:360px;line-height:1.6;text-align:center"></p>
-</div>
-
-<div id="app" style="display:none">
 <div class="wrap">
 
   <!-- ── HEADER ───────────────────────────────────────────── -->
@@ -376,8 +369,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
     </div>
 
   </div>
-</div><!-- /.wrap -->
-</div><!-- /#app -->
+</div>
 
 <!-- ── MODAL ─────────────────────────────────────────────── -->
 <div class="ov" id="ov">
@@ -388,7 +380,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
   </div>
 </div>
 <div class="toast" id="toast"></div>
-
 
 
 <div class="ov" id="ov">
@@ -413,42 +404,25 @@ var BASE = SUPABASE_URL + '/rest/v1/';
 var HDR  = {
   'apikey':        SUPABASE_KEY,
   'Authorization': 'Bearer ' + SUPABASE_KEY,
-  'Content-Type':  'application/json'
-  // Prefer header set per-request to avoid conflicts with identity columns
+  'Content-Type':  'application/json',
+  'Prefer':        'return=representation'
 };
 
 async function sbFetch(method, path, body, extraHeaders) {
-  // Use AbortController so fetch itself can be cancelled after timeout
-  var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, 10000);
   try {
-    var preferHeader = {};
-    if (method === 'POST' || method === 'PATCH') {
-      preferHeader = { 'Prefer': 'return=representation' };
-    }
     var res = await fetch(BASE + path, {
       method:  method,
-      headers: Object.assign({}, HDR, preferHeader, extraHeaders || {}),
-      body:    body ? JSON.stringify(body) : undefined,
-      signal:  controller.signal
+      headers: Object.assign({}, HDR, extraHeaders || {}),
+      body:    body ? JSON.stringify(body) : undefined
     });
-    clearTimeout(timer);
     var text = await res.text();
     var json = text ? JSON.parse(text) : [];
     if (!res.ok) {
-      var errObj = Array.isArray(json) ? json[0] : json;
-      var msg    = (errObj && errObj.message) ? errObj.message : res.statusText;
-      var hint   = (errObj && errObj.hint)    ? ' Hint: ' + errObj.hint : '';
-      console.error('Supabase [' + method + ' ' + path.split('?')[0] + ']:', errObj);
-      return { data: null, error: msg + hint };
+      var msg = (json && json.message) ? json.message : (json && json.hint ? json.hint : res.statusText);
+      return { data: null, error: msg };
     }
     return { data: Array.isArray(json) ? json : [json], error: null };
   } catch(e) {
-    clearTimeout(timer);
-    if (e.name === 'AbortError') {
-      console.error('Supabase TIMEOUT [' + method + ' ' + path.split('?')[0] + ']');
-      return { data: null, error: 'Request timed out after 10s — ' + path.split('?')[0] };
-    }
     return { data: null, error: e.message };
   }
 }
@@ -463,7 +437,7 @@ var db = {
   upsert: function(table, rows, conflict) {
     return sbFetch('POST', table + '?on_conflict=' + (conflict||'id'),
       Array.isArray(rows) ? rows : [rows],
-      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      { 'Prefer': 'resolution=merge-duplicates,return=representation' });
   },
   update: function(table, patch, col, val) {
     return sbFetch('PATCH', table + '?' + col + '=eq.' + encodeURIComponent(val), patch, null);
@@ -548,29 +522,15 @@ async function seedCompanies() {
 async function loadAllData() {
   // Student state
   var r1 = await db.select('student_state');
-  if (r1.error) {
-    // Try localStorage fallback
-    try {
-      var stCache = localStorage.getItem('ims_st_cache');
-      if (stCache) ST = JSON.parse(stCache);
-    } catch(e) {}
-    throw new Error('student_state: ' + r1.error);
-  }
+  if (r1.error) throw new Error('student_state: ' + r1.error);
   (r1.data||[]).forEach(function(row) {
     ST[row.idx] = {
       choices: [row.choice_1||'', row.choice_2||'', row.choice_3||''],
       log: row.log || []
     };
-    // Rebuild RAW entry from DB only if not already in local cache
-    // Prefer local RAW (from Excel load) over DB reconstruction
-    if (!RAW.find(function(r){ return String(r.idx) === String(row.idx); })) {
-      // Try to get name/cls from students table data or use idx as fallback
-      var namePart = row.name || String(row.idx).split('_')[0] || row.idx;
-      var clsPart  = row.cls  || String(row.idx).split('_')[1] || '';
-      RAW.push({
-        idx: row.idx, cls: clsPart, name: namePart,
-        c: [row.choice_1||'', row.choice_2||'', row.choice_3||'']
-      });
+    // Also rebuild RAW entry if not already there (loaded from DB)
+    if (!RAW.find(function(r){ return r.idx === row.idx; })) {
+      RAW.push({ idx:row.idx, cls:row.cls||'', name:row.name||row.idx, c:[row.choice_1||'',row.choice_2||'',row.choice_3||''] });
     }
   });
 
@@ -582,39 +542,20 @@ async function loadAllData() {
   // Interviews
   var r3 = await db.select('interviews', 'order=dt.asc');
   if (r3.error) throw new Error('interviews: ' + r3.error);
-  var loaded = (r3.data||[]).map(function(row){
+  ivs = (r3.data||[]).map(function(row){
     return { id:row.id, idx:row.idx, name:row.name, cls:row.cls,
       company:row.company, rank:row.rank, dt:row.dt, status:row.status,
       mode:row.mode||'Face to Face' };
   });
-  // Use Supabase data if it has records
-  // If Supabase returns empty but we have local cache, keep local
-  if (loaded.length > 0) {
-    ivs = loaded;
-    // Cache to localStorage as fallback
-    try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
-  } else if (ivs.length === 0) {
-    // Try restoring from localStorage cache
-    try {
-      var cached = localStorage.getItem('ims_ivs_cache');
-      if (cached) {
-        ivs = JSON.parse(cached);
-        console.log('Restored ' + ivs.length + ' interviews from local cache');
-      }
-    } catch(e) {}
-  }
 }
 
 // ── saveData: persist all mutable state to Supabase ─────────
 // Called after every action. Updates student_state, companies, interviews.
 
 async function saveData() {
-  // Cache key state to localStorage as fallback for Supabase outages
-  try {
-    localStorage.setItem('ims_raw', JSON.stringify(RAW));
-    localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs));
-    localStorage.setItem('ims_st_cache', JSON.stringify(ST));
-  } catch(e) {}
+  // This is a lightweight save — we push changed state after each action
+  // Full sync happens via explicit calls in each action function
+  try { localStorage.setItem('ims_raw', JSON.stringify(RAW)); } catch(e) {}
 }
 
 // ── Per-action Supabase writes ───────────────────────────────
@@ -631,18 +572,9 @@ async function dbSaveStudentState(idx) {
 }
 
 async function dbAddInterview(row) {
-  // Always strip id — Supabase auto-generates bigint identity id
-  // Explicitly list all fields to avoid sending id accidentally
-  var toInsert = {
-    idx:     row.idx,
-    name:    row.name,
-    cls:     row.cls,
-    company: row.company,
-    rank:    row.rank    || 1,
-    dt:      row.dt,
-    status:  row.status  || 'Pending',
-    mode:    row.mode    || 'Face to Face'  // requires mode column in Supabase
-  };
+  // Remove id — let Supabase auto-generate it
+  var toInsert = { idx:row.idx, name:row.name, cls:row.cls, company:row.company,
+    rank:row.rank, dt:row.dt, status:row.status, mode:row.mode||'Face to Face' };
   var r = await db.insert('interviews', [toInsert]);
   if (r.error) { toast('Save failed: ' + r.error); return null; }
   return r.data && r.data[0] ? r.data[0] : Object.assign({ id: Date.now() }, toInsert);
@@ -733,7 +665,7 @@ var eid = null; // id of record being edited in modal
 // Used in: export filenames, import migration checks,
 //          and the version badge shown in the header.
 // ============================================================
-var APP_VERSION = '2025.05.20';
+var APP_VERSION = '2025.05.17';
 var LS_KEY = 'ims_raw'; // only used for RAW cache
 
 // ============================================================
@@ -924,7 +856,7 @@ async function importData(event) {
   var file = event.target.files[0];
   if (!file) return;
   var reader = new FileReader();
-  reader.onload = async function(ev) {
+  reader.onload = function(ev) {
     try {
       var d = JSON.parse(ev.target.result);
 
@@ -977,18 +909,13 @@ async function importData(event) {
       try {
         await Promise.all([seedStudents(), seedStudentState(), seedCompanies()]);
         // Re-insert all interviews
-        // Strip id field — Supabase auto-generates it
         for (var ii = 0; ii < ivs.length; ii++) {
-          var iv = Object.assign({}, ivs[ii]);
-          delete iv.id;
-          var saved = await dbAddInterview(iv);
-          // Update local id with the Supabase-generated one
-          if (saved) ivs[ii].id = saved.id;
+          await dbAddInterview(ivs[ii]);
         }
         toast('Import complete!');
       } catch(e) {
         console.warn('Import seed error:', e);
-        toast('Import error: ' + e.message + ' - check browser console for details');
+        toast('Warning: ' + e.message);
       }
       refreshAll();
       if (RAW.length) updateHeader('backup file', RAW.length);
@@ -1197,8 +1124,9 @@ async function markPlaced(idx) {
   if (!confirm('Mark ' + s.name + ' as placed directly (no interview)?')) return;
 
   var company = ST[String(idx)] ? (ST[String(idx)].choices[0] || 'Direct placement') : 'Direct placement';
-  // No id — Supabase generates it automatically
+  var id = Date.now();
   var placedIv = {
+    id: id,
     idx: String(idx),
     name: s.name,
     cls: s.cls,
@@ -1320,7 +1248,7 @@ function renderIv() {
   }).join('');
 }
 
-async function addIv() {
+function addIv() {
   var sidx    = String(document.getElementById('i-stu').value); // string key
   var company = document.getElementById('i-co').value;
   var dt      = document.getElementById('i-dt').value;
@@ -1331,10 +1259,10 @@ async function addIv() {
   var s    = RAW.find(function(r){ return String(r.idx)===sidx; });
   if (!s)  { toast('Student not found'); return; }
   var rank = (ST[sidx] ? ST[sidx].choices.indexOf(company) + 1 : 0) || 1;
+  var id   = Date.now();
 
   var mode = document.getElementById('i-mode') ? document.getElementById('i-mode').value : 'Face to Face';
-  // Do NOT include id — Supabase generates it automatically (bigint identity)
-  var newIv = { idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode };
+  var newIv = { id:id, idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode };
   var saved = await dbAddInterview(newIv);
   if (!saved) return;
   ivs.push(saved);
@@ -1342,8 +1270,6 @@ async function addIv() {
   // Auto-promote choices if rejected immediately
   if (status === 'Reject') promote(sidx);
 
-  // Cache locally as fallback
-  try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
   renderIv(); renderStu(); mets(); onSC();
   if (document.getElementById('calendar').classList.contains('active')) renderCal();
   toast('Interview scheduled for ' + s.name.split(' ')[0]);
@@ -1404,7 +1330,7 @@ async function saveEI() {
   closeMod(); toast('Interview updated');
 }
 
-async function delIv(id) {
+function delIv(id) {
   if (!confirm('Delete this interview record?')) return;
   ivs = ivs.filter(function(i){ return i.id !== id; });
   saveData();
@@ -1432,7 +1358,7 @@ function renderCos() {
   }).join('');
 }
 
-async function addCo() {
+function addCo() {
   var v = document.getElementById('new-co').value.trim();
   if (!v) { toast('Enter a company name'); return; }
   if (cos.includes(v)) { toast('Company already exists'); return; }
@@ -1453,7 +1379,7 @@ function openEC(i) {
   document.getElementById('ov').classList.add('open');
 }
 
-async function saveEC() {
+function saveEC() {
   var v = document.getElementById('e-cn').value.trim();
   if (!v) { toast('Name cannot be empty'); return; }
   var old = cos[eid];
@@ -1470,7 +1396,7 @@ async function saveEC() {
   renderCos(); renderStu(); renderIv(); popCoFil(); closeMod(); toast('Company renamed');
 }
 
-async function delCo(i) {
+function delCo(i) {
   if (!confirm('Remove "' + cos[i] + '" from the list?')) return;
   var name = cos[i];
   cos.splice(i, 1);
@@ -1573,7 +1499,7 @@ function sendTodayReminders() {
     'Internship Interview Reminders\n' +
     today.toLocaleDateString('en-SG',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) +
     '\n\n' + rows + '\n\nPlease ensure all students are informed and prepared.');
-  window.open('https://api.whatsapp.com/send?phone=6596505901&text=' + msg);
+  window.open('https://wa.me/6596505901?text=' + msg);
 }
 
 function sendWAReminder(id) {
@@ -1592,7 +1518,7 @@ function sendWAReminder(id) {
     'Time    : ' + t           + '\n' +
     'Date    : ' + dt          + '\n\n' +
     'Please ensure the student is informed and prepared.');
-  window.open('https://api.whatsapp.com/send?phone=6596505901&text=' + msg);
+  window.open('https://wa.me/6596505901?text=' + msg);
 }
 
 // ============================================================
@@ -1933,39 +1859,39 @@ function checkTodayReminders() {
 // DEBUG FUNCTION — Test Supabase connectivity step by step
 // ============================================================
 async function testSupabase() {
-  var results = '';
+  toast('Step 1: Testing connection...');
+  console.log('Testing Supabase connection...');
 
-  // Test students
+  // Test 1: basic fetch
   try {
-    var r1 = await withTimeout(db.select('students','select=idx&limit=1'), 5000, 'students');
-    results += 'students: ' + (r1.error ? 'FAIL - '+r1.error : 'OK ('+( r1.data||[]).length+' rows)') + '\n';
-  } catch(e) { results += 'students: TIMEOUT\n'; }
+    var r1 = await db.select('students', 'select=idx&limit=1');
+    if (r1.error) {
+      alert('STEP 1 FAILED - students select:\n' + r1.error);
+      return;
+    }
+    console.log('Step 1 OK - students:', r1.data);
+    toast('Step 1 OK: DB connection works!');
+  } catch(e) {
+    alert('STEP 1 EXCEPTION:\n' + e.message);
+    return;
+  }
 
-  // Test student_state
+  // Test 2: insert a test company
   try {
-    var r2 = await withTimeout(db.select('student_state','select=idx&limit=1'), 5000, 'student_state');
-    results += 'student_state: ' + (r2.error ? 'FAIL - '+r2.error : 'OK') + '\n';
-  } catch(e) { results += 'student_state: TIMEOUT\n'; }
+    var r2 = await db.insert('companies', [{ name: '__test__' }]);
+    if (r2.error) {
+      alert('STEP 2 FAILED - companies insert:\n' + r2.error);
+      return;
+    }
+    toast('Step 2 OK: Insert works!');
+    // Clean up test entry
+    await db.del('companies', 'name', '__test__');
+  } catch(e) {
+    alert('STEP 2 EXCEPTION:\n' + e.message);
+    return;
+  }
 
-  // Test companies
-  try {
-    var r3 = await withTimeout(db.select('companies','select=name&limit=1'), 5000, 'companies');
-    results += 'companies: ' + (r3.error ? 'FAIL - '+r3.error : 'OK') + '\n';
-  } catch(e) { results += 'companies: TIMEOUT\n'; }
-
-  // Test interviews - this is the one hanging
-  try {
-    var r4 = await withTimeout(db.select('interviews','select=id&limit=1'), 5000, 'interviews');
-    results += 'interviews: ' + (r4.error ? 'FAIL - '+r4.error : 'OK ('+r4.data.length+' rows)') + '\n';
-  } catch(e) { results += 'interviews: TIMEOUT - ' + e.message + '\n'; }
-
-  // Test interviews count
-  try {
-    var r5 = await withTimeout(db.select('interviews','select=id&limit=500'), 8000, 'interviews-count');
-    results += 'interviews count: ' + ((r5.data||[]).length) + ' rows\n';
-  } catch(e) { results += 'interviews count: TIMEOUT\n'; }
-
-  alert('Database Test Results:\n\n' + results);
+  alert('All tests PASSED!\nSupabase connection is working correctly.\nYou can now load your Excel file.');
 }
 
 // ============================================================
@@ -1976,182 +1902,38 @@ async function testSupabase() {
 // 4. Restore RAW from localStorage cache if Supabase has none
 // 5. Render UI
 // ============================================================
-/**
- * withTimeout — wraps a promise with a timeout
- * so the app never hangs forever on network issues
- */
-function withTimeout(promise, ms, label) {
-  var timeout = new Promise(function(_, reject) {
-    setTimeout(function() {
-      reject(new Error(label + ' timed out after ' + (ms/1000) + 's'));
-    }, ms);
-  });
-  return Promise.race([promise, timeout]);
-}
-
 async function initApp() {
   setLoading(true);
   setMsg('Connecting to database...');
 
-  // Step 1: Restore RAW from localStorage IMMEDIATELY
-  // Do this before any network calls so the app can work even if Supabase is slow
-  try {
-    var rawCache = localStorage.getItem('ims_raw');
-    if (rawCache) RAW = JSON.parse(rawCache);
-    var ivsCache = localStorage.getItem('ims_ivs_cache');
-    if (ivsCache) ivs = JSON.parse(ivsCache);
-    var stCache = localStorage.getItem('ims_st_cache');
-    if (stCache) ST = JSON.parse(stCache);
-    if (RAW.length) {
-      var classes = countClasses();
-      rebuildClassFilters(classes);
-      cos = Array.from(new Set(RAW.flatMap(function(s){ return s.c; }).filter(Boolean))).sort();
-      console.log('Cache restored: ' + RAW.length + ' students, ' + ivs.length + ' interviews');
-    }
-  } catch(e) {
-    console.warn('Cache restore error:', e);
-  }
-
-  // Step 2: connection test with 8 second timeout
-  setMsg('Connecting to database...');
-  try {
-    var ping = await withTimeout(
-      db.select('students', 'select=idx&limit=1'),
-      8000, 'Connection test'
-    );
-    if (ping.error) {
-      // Show app with cached data even if Supabase unreachable
-      console.warn('Supabase unreachable:', ping.error);
-      if (RAW.length) {
-        popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
-        rebuildClassFilters(countClasses());
-        updateHeader('offline (cached)', RAW.length);
-        setLoading(false);
-        toast('Using cached data — database unavailable');
-        return;
-      }
-      showError('Cannot reach database', ping.error + ' — Check internet connection.');
-      return;
-    }
-  } catch(e) {
-    // Timeout — use cached data if available
-    if (RAW.length) {
-      popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
-      rebuildClassFilters(countClasses());
-      updateHeader('offline (cached)', RAW.length);
-      setLoading(false);
-      toast('Connection timed out — using cached data');
-      return;
-    }
-    showError('Connection timed out', e.message);
+  // Step 1: connection test
+  var ping = await db.select('students', 'select=idx&limit=1');
+  if (ping.error) {
+    showError('Cannot reach Supabase', ping.error +
+      ' -- Check your internet connection.');
     return;
   }
 
-  // Step 3: Load data with individual step timeouts
-  setMsg('Loading students...');
+  // Step 2: load all data
+  setMsg('Loading data...');
   try {
-    // Load students table first — this has reliable name + cls columns
-    var rStu = await withTimeout(db.select('students', 'select=idx,name,cls,choice_1,choice_2,choice_3'), 8000, 'students');
-    if (!rStu.error && rStu.data && rStu.data.length) {
-      rStu.data.forEach(function(row) {
-        if (!RAW.find(function(r){ return String(r.idx)===String(row.idx); })) {
-          RAW.push({
-            idx: row.idx,
-            cls: row.cls || '',
-            name: row.name || row.idx,
-            c: [row.choice_1||'', row.choice_2||'', row.choice_3||'']
-          });
-        }
-      });
-    }
-  } catch(e) { console.warn('students load timeout:', e.message); }
-
-  try {
-    // Then load student_state for current choices and logs
-    var r1 = await withTimeout(db.select('student_state'), 8000, 'student_state');
-    if (!r1.error) {
-      (r1.data||[]).forEach(function(row) {
-        ST[row.idx] = {
-          choices: [row.choice_1||'', row.choice_2||'', row.choice_3||''],
-          log: row.log || []
-        };
-        // Only add to RAW if still missing after students table load
-        if (!RAW.find(function(r){ return String(r.idx)===String(row.idx); })) {
-          var namePart = row.name || String(row.idx).split('_')[0];
-          var clsPart  = row.cls  || String(row.idx).split('_')[1] || '';
-          RAW.push({ idx:row.idx, cls:clsPart, name:namePart,
-            c:[row.choice_1||'',row.choice_2||'',row.choice_3||''] });
-        }
-      });
-    }
-  } catch(e) { console.warn('student_state load timeout:', e.message); }
-
-  setMsg('Loading companies...');
-  try {
-    var r2 = await withTimeout(db.select('companies', 'order=name.asc'), 8000, 'companies');
-    if (!r2.error && r2.data && r2.data.length) {
-      cos = r2.data.map(function(row){ return row.name; });
-    }
-  } catch(e) { console.warn('companies load timeout:', e.message); }
-
-  setMsg('Loading interviews...');
-  try {
-    // Use select=* without ordering first to avoid schema issues
-    var r3 = await withTimeout(
-      db.select('interviews', 'select=id,idx,name,cls,company,rank,dt,status,mode&limit=500'),
-      6000, 'interviews'
-    );
-    if (r3.error) {
-      console.warn('interviews load error:', r3.error);
-      // Try restoring from cache
-      try {
-        var ivsCache = localStorage.getItem('ims_ivs_cache');
-        if (ivsCache && ivs.length === 0) {
-          ivs = JSON.parse(ivsCache);
-          toast('Interviews loaded from cache (' + ivs.length + ' records)');
-        }
-      } catch(ce) {}
-    } else if (r3.data && r3.data.length) {
-      ivs = r3.data.map(function(row){
-        return {
-          id:      row.id,
-          idx:     String(row.idx),
-          name:    row.name    || '',
-          cls:     row.cls     || '',
-          company: row.company || '',
-          rank:    row.rank    || 1,
-          dt:      row.dt      || '',
-          status:  row.status  || 'Pending',
-          mode:    row.mode    || 'Face to Face'
-        };
-      });
-      // Sort by dt after loading
-      ivs.sort(function(a,b){ return (a.dt||'').localeCompare(b.dt||''); });
-      // Cache locally
-      try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
-    } else {
-      // Supabase returned empty — try cache
-      try {
-        var ivsCache2 = localStorage.getItem('ims_ivs_cache');
-        if (ivsCache2 && ivs.length === 0) {
-          ivs = JSON.parse(ivsCache2);
-          console.log('Interviews: restored ' + ivs.length + ' from cache (Supabase empty)');
-        }
-      } catch(ce) {}
-    }
+    await loadAllData();
   } catch(e) {
-    console.warn('interviews load failed:', e.message);
-    // Restore from cache on timeout
-    try {
-      var ivsCache3 = localStorage.getItem('ims_ivs_cache');
-      if (ivsCache3 && ivs.length === 0) {
-        ivs = JSON.parse(ivsCache3);
-        toast('Interviews restored from cache (' + ivs.length + ')');
-      }
-    } catch(ce) {}
+    showError('Data load failed', e.message); return;
   }
 
-  // Step 4: Render UI
+  // Step 3: if no students in Supabase, try to restore RAW from localStorage cache
+  if (!RAW.length) {
+    try {
+      var cached = localStorage.getItem('ims_raw');
+      if (cached) {
+        RAW = JSON.parse(cached);
+        updateHeader('cached session', RAW.length);
+      }
+    } catch(e) {}
+  }
+
+  // Step 4: render UI
   popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
   var classes = countClasses();
   rebuildClassFilters(classes);
@@ -2161,7 +1943,7 @@ async function initApp() {
   setTimeout(checkTodayReminders, 500);
 }
 
-initApp();;
+initApp();
 
 </script>
 </body>
