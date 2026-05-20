@@ -1928,39 +1928,39 @@ function checkTodayReminders() {
 // DEBUG FUNCTION — Test Supabase connectivity step by step
 // ============================================================
 async function testSupabase() {
-  toast('Step 1: Testing connection...');
-  console.log('Testing Supabase connection...');
+  var results = '';
 
-  // Test 1: basic fetch
+  // Test students
   try {
-    var r1 = await db.select('students', 'select=idx&limit=1');
-    if (r1.error) {
-      alert('STEP 1 FAILED - students select:\n' + r1.error);
-      return;
-    }
-    console.log('Step 1 OK - students:', r1.data);
-    toast('Step 1 OK: DB connection works!');
-  } catch(e) {
-    alert('STEP 1 EXCEPTION:\n' + e.message);
-    return;
-  }
+    var r1 = await withTimeout(db.select('students','select=idx&limit=1'), 5000, 'students');
+    results += 'students: ' + (r1.error ? 'FAIL - '+r1.error : 'OK ('+( r1.data||[]).length+' rows)') + '\n';
+  } catch(e) { results += 'students: TIMEOUT\n'; }
 
-  // Test 2: insert a test company
+  // Test student_state
   try {
-    var r2 = await db.insert('companies', [{ name: '__test__' }]);
-    if (r2.error) {
-      alert('STEP 2 FAILED - companies insert:\n' + r2.error);
-      return;
-    }
-    toast('Step 2 OK: Insert works!');
-    // Clean up test entry
-    await db.del('companies', 'name', '__test__');
-  } catch(e) {
-    alert('STEP 2 EXCEPTION:\n' + e.message);
-    return;
-  }
+    var r2 = await withTimeout(db.select('student_state','select=idx&limit=1'), 5000, 'student_state');
+    results += 'student_state: ' + (r2.error ? 'FAIL - '+r2.error : 'OK') + '\n';
+  } catch(e) { results += 'student_state: TIMEOUT\n'; }
 
-  alert('All tests PASSED!\nSupabase connection is working correctly.\nYou can now load your Excel file.');
+  // Test companies
+  try {
+    var r3 = await withTimeout(db.select('companies','select=name&limit=1'), 5000, 'companies');
+    results += 'companies: ' + (r3.error ? 'FAIL - '+r3.error : 'OK') + '\n';
+  } catch(e) { results += 'companies: TIMEOUT\n'; }
+
+  // Test interviews - this is the one hanging
+  try {
+    var r4 = await withTimeout(db.select('interviews','select=id&limit=1'), 5000, 'interviews');
+    results += 'interviews: ' + (r4.error ? 'FAIL - '+r4.error : 'OK ('+r4.data.length+' rows)') + '\n';
+  } catch(e) { results += 'interviews: TIMEOUT - ' + e.message + '\n'; }
+
+  // Test interviews count
+  try {
+    var r5 = await withTimeout(db.select('interviews','select=id&limit=500'), 8000, 'interviews-count');
+    results += 'interviews count: ' + ((r5.data||[]).length) + ' rows\n';
+  } catch(e) { results += 'interviews count: TIMEOUT\n'; }
+
+  alert('Database Test Results:\n\n' + results);
 }
 
 // ============================================================
@@ -2072,17 +2072,60 @@ async function initApp() {
 
   setMsg('Loading interviews...');
   try {
-    var r3 = await withTimeout(db.select('interviews', 'order=dt.asc'), 8000, 'interviews');
-    if (!r3.error && r3.data && r3.data.length) {
+    // Use select=* without ordering first to avoid schema issues
+    var r3 = await withTimeout(
+      db.select('interviews', 'select=id,idx,name,cls,company,rank,dt,status,mode&limit=500'),
+      6000, 'interviews'
+    );
+    if (r3.error) {
+      console.warn('interviews load error:', r3.error);
+      // Try restoring from cache
+      try {
+        var ivsCache = localStorage.getItem('ims_ivs_cache');
+        if (ivsCache && ivs.length === 0) {
+          ivs = JSON.parse(ivsCache);
+          toast('Interviews loaded from cache (' + ivs.length + ' records)');
+        }
+      } catch(ce) {}
+    } else if (r3.data && r3.data.length) {
       ivs = r3.data.map(function(row){
-        return { id:row.id, idx:row.idx, name:row.name, cls:row.cls,
-          company:row.company, rank:row.rank, dt:row.dt,
-          status:row.status, mode:row.mode||'Face to Face' };
+        return {
+          id:      row.id,
+          idx:     String(row.idx),
+          name:    row.name    || '',
+          cls:     row.cls     || '',
+          company: row.company || '',
+          rank:    row.rank    || 1,
+          dt:      row.dt      || '',
+          status:  row.status  || 'Pending',
+          mode:    row.mode    || 'Face to Face'
+        };
       });
+      // Sort by dt after loading
+      ivs.sort(function(a,b){ return (a.dt||'').localeCompare(b.dt||''); });
       // Cache locally
       try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
+    } else {
+      // Supabase returned empty — try cache
+      try {
+        var ivsCache2 = localStorage.getItem('ims_ivs_cache');
+        if (ivsCache2 && ivs.length === 0) {
+          ivs = JSON.parse(ivsCache2);
+          console.log('Interviews: restored ' + ivs.length + ' from cache (Supabase empty)');
+        }
+      } catch(ce) {}
     }
-  } catch(e) { console.warn('interviews load timeout:', e.message); }
+  } catch(e) {
+    console.warn('interviews load failed:', e.message);
+    // Restore from cache on timeout
+    try {
+      var ivsCache3 = localStorage.getItem('ims_ivs_cache');
+      if (ivsCache3 && ivs.length === 0) {
+        ivs = JSON.parse(ivsCache3);
+        toast('Interviews restored from cache (' + ivs.length + ')');
+      }
+    } catch(ce) {}
+  }
 
   // Step 4: Render UI
   popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
