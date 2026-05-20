@@ -551,11 +551,16 @@ async function loadAllData() {
   // Interviews
   var r3 = await db.select('interviews', 'order=dt.asc');
   if (r3.error) throw new Error('interviews: ' + r3.error);
-  ivs = (r3.data||[]).map(function(row){
+  var loaded = (r3.data||[]).map(function(row){
     return { id:row.id, idx:row.idx, name:row.name, cls:row.cls,
       company:row.company, rank:row.rank, dt:row.dt, status:row.status,
       mode:row.mode||'Face to Face' };
   });
+  // Only overwrite local ivs if Supabase returned data
+  // Prevents data loss if Supabase is temporarily empty
+  if (loaded.length > 0 || ivs.length === 0) {
+    ivs = loaded;
+  }
 }
 
 // ── saveData: persist all mutable state to Supabase ─────────
@@ -591,7 +596,7 @@ async function dbAddInterview(row) {
     rank:    row.rank    || 1,
     dt:      row.dt,
     status:  row.status  || 'Pending',
-    mode:    row.mode    || 'Face to Face'
+    mode:    row.mode    || 'Face to Face'  // requires mode column in Supabase
   };
   var r = await db.insert('interviews', [toInsert]);
   if (r.error) { toast('Save failed: ' + r.error); return null; }
@@ -683,7 +688,7 @@ var eid = null; // id of record being edited in modal
 // Used in: export filenames, import migration checks,
 //          and the version badge shown in the header.
 // ============================================================
-var APP_VERSION = '2025.05.17';
+var APP_VERSION = '2025.05.20';
 var LS_KEY = 'ims_raw'; // only used for RAW cache
 
 // ============================================================
@@ -938,7 +943,7 @@ async function importData(event) {
         toast('Import complete!');
       } catch(e) {
         console.warn('Import seed error:', e);
-        toast('Warning: ' + e.message);
+        toast('Import error: ' + e.message + ' - check browser console for details');
       }
       refreshAll();
       if (RAW.length) updateHeader('backup file', RAW.length);
@@ -1521,7 +1526,7 @@ function sendTodayReminders() {
     'Internship Interview Reminders\n' +
     today.toLocaleDateString('en-SG',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) +
     '\n\n' + rows + '\n\nPlease ensure all students are informed and prepared.');
-  window.open('https://wa.me/6596505901?text=' + msg);
+  window.open('https://api.whatsapp.com/send?phone=6596505901&text=' + msg);
 }
 
 function sendWAReminder(id) {
@@ -1540,7 +1545,7 @@ function sendWAReminder(id) {
     'Time    : ' + t           + '\n' +
     'Date    : ' + dt          + '\n\n' +
     'Please ensure the student is informed and prepared.');
-  window.open('https://wa.me/6596505901?text=' + msg);
+  window.open('https://api.whatsapp.com/send?phone=6596505901&text=' + msg);
 }
 
 // ============================================================
