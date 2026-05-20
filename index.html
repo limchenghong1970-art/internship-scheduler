@@ -418,11 +418,10 @@ var HDR  = {
 };
 
 async function sbFetch(method, path, body, extraHeaders) {
+  // Use AbortController so fetch itself can be cancelled after timeout
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, 10000);
   try {
-    // Set Prefer header based on method:
-    // GET: no Prefer needed
-    // POST/PATCH: return=representation to get back the saved row
-    // DELETE: return=minimal
     var preferHeader = {};
     if (method === 'POST' || method === 'PATCH') {
       preferHeader = { 'Prefer': 'return=representation' };
@@ -430,20 +429,26 @@ async function sbFetch(method, path, body, extraHeaders) {
     var res = await fetch(BASE + path, {
       method:  method,
       headers: Object.assign({}, HDR, preferHeader, extraHeaders || {}),
-      body:    body ? JSON.stringify(body) : undefined
+      body:    body ? JSON.stringify(body) : undefined,
+      signal:  controller.signal
     });
+    clearTimeout(timer);
     var text = await res.text();
     var json = text ? JSON.parse(text) : [];
     if (!res.ok) {
       var errObj = Array.isArray(json) ? json[0] : json;
-      var msg = (errObj && errObj.message) ? errObj.message : res.statusText;
-      var hint = (errObj && errObj.hint) ? ' | Hint: ' + errObj.hint : '';
-      var detail = (errObj && errObj.details) ? ' | ' + errObj.details : '';
-      console.error('Supabase error [' + method + ' ' + path + ']:', errObj);
-      return { data: null, error: msg + hint + detail };
+      var msg    = (errObj && errObj.message) ? errObj.message : res.statusText;
+      var hint   = (errObj && errObj.hint)    ? ' Hint: ' + errObj.hint : '';
+      console.error('Supabase [' + method + ' ' + path.split('?')[0] + ']:', errObj);
+      return { data: null, error: msg + hint };
     }
     return { data: Array.isArray(json) ? json : [json], error: null };
   } catch(e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') {
+      console.error('Supabase TIMEOUT [' + method + ' ' + path.split('?')[0] + ']');
+      return { data: null, error: 'Request timed out after 10s — ' + path.split('?')[0] };
+    }
     return { data: null, error: e.message };
   }
 }
