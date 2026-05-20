@@ -556,9 +556,16 @@ async function loadAllData() {
       choices: [row.choice_1||'', row.choice_2||'', row.choice_3||''],
       log: row.log || []
     };
-    // Also rebuild RAW entry if not already there (loaded from DB)
-    if (!RAW.find(function(r){ return r.idx === row.idx; })) {
-      RAW.push({ idx:row.idx, cls:row.cls||'', name:row.name||row.idx, c:[row.choice_1||'',row.choice_2||'',row.choice_3||''] });
+    // Rebuild RAW entry from DB only if not already in local cache
+    // Prefer local RAW (from Excel load) over DB reconstruction
+    if (!RAW.find(function(r){ return String(r.idx) === String(row.idx); })) {
+      // Try to get name/cls from students table data or use idx as fallback
+      var namePart = row.name || String(row.idx).split('_')[0] || row.idx;
+      var clsPart  = row.cls  || String(row.idx).split('_')[1] || '';
+      RAW.push({
+        idx: row.idx, cls: clsPart, name: namePart,
+        c: [row.choice_1||'', row.choice_2||'', row.choice_3||'']
+      });
     }
   });
 
@@ -1976,7 +1983,19 @@ async function initApp() {
     return;
   }
 
-  // Step 2: load all data
+  // Step 2: restore RAW from localStorage cache FIRST
+  // This ensures student names are available before loadAllData runs
+  if (!RAW.length) {
+    try {
+      var rawCache = localStorage.getItem('ims_raw');
+      if (rawCache) {
+        RAW = JSON.parse(rawCache);
+        console.log('RAW restored from cache: ' + RAW.length + ' students');
+      }
+    } catch(e) {}
+  }
+
+  // Step 3: load all live data from Supabase
   setMsg('Loading data...');
   try {
     await loadAllData();
@@ -1984,15 +2003,9 @@ async function initApp() {
     showError('Data load failed', e.message); return;
   }
 
-  // Step 3: if no students in Supabase, try to restore RAW from localStorage cache
+  // Step 4: if still no students, show warning
   if (!RAW.length) {
-    try {
-      var cached = localStorage.getItem('ims_raw');
-      if (cached) {
-        RAW = JSON.parse(cached);
-        updateHeader('cached session', RAW.length);
-      }
-    } catch(e) {}
+    console.warn('No student data found — please load your Excel file');
   }
 
   // Step 4: render UI
