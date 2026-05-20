@@ -1,0 +1,1921 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  INTERNSHIP MANAGEMENT SYSTEM — Excel + localStorage Edition
+  ============================================================
+  How it works
+  ------------
+  - Open this HTML file directly from any drive (D:\, etc.)
+  - Click "Load from Excel" to import student data from your
+    Combined_Choices.xlsx file at any time
+  - All interview records, choice edits, and added companies
+    are saved automatically to browser localStorage
+  - Data survives browser restarts and page refreshes
+  - Export / Import JSON buttons let you back up and restore
+
+  Excel format expected
+  ---------------------
+  Columns: Student Name, Class, 1st Choice, 2nd Choice, 3rd Choice
+  (header row is skipped automatically)
+
+  Libraries used
+  --------------
+  - SheetJS (xlsx)  : reads .xlsx files in the browser
+  - Tabler Icons    : icon webfont (requires internet for icons)
+  ============================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Internship Interview Scheduler</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.7.0/dist/tabler-icons.min.css">
+<!-- SheetJS: reads Excel files directly in the browser, no server needed -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#fff;--bg2:#f5f5f4;--bg3:#eeede8;--bgi:#e6f1fb;--bgs:#eaf3de;--bgw:#faeeda;--bgd:#fcebeb;--tx:#1a1a1a;--tx2:#6b6b6b;--tx3:#9b9b9b;--txi:#0c447c;--txs:#27500a;--txw:#633806;--txd:#791f1f;--bd:rgba(0,0,0,0.12);--bd2:rgba(0,0,0,0.22);--rm:8px;--rl:12px;--font:'Tenorite','Segoe UI',system-ui,sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1c1c;--bg2:#2a2a2a;--bg3:#222;--bgi:#042c53;--bgs:#173404;--bgw:#412402;--bgd:#501313;--tx:#f0f0f0;--tx2:#a0a0a0;--tx3:#6a6a6a;--txi:#85b7eb;--txs:#97c459;--txw:#ef9f27;--txd:#f09595;--bd:rgba(255,255,255,0.12);--bd2:rgba(255,255,255,0.22)}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg3);color:var(--tx);min-height:100vh}
+.wrap{max-width:1000px;margin:0 auto;min-height:100vh}
+.hdr{background:var(--bg);border-bottom:.5px solid var(--bd);padding:1rem 1.5rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hdr h1{font-size:17px;font-weight:500}.hdr p{font-size:12px;color:var(--tx2)}
+.hdr-btns{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:auto}
+.body{padding:1.25rem 1.5rem}
+.tabs{display:flex;border-bottom:.5px solid var(--bd);margin-bottom:1.5rem;background:var(--bg);border-radius:var(--rl) var(--rl) 0 0;padding:0 1rem;overflow-x:auto}
+.tab{padding:11px 16px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:transparent;color:var(--tx2);border-bottom:2px solid transparent;margin-bottom:-.5px;font-family:var(--font);white-space:nowrap}
+.tab.active{color:var(--tx);border-bottom:2px solid var(--tx)}.tab:hover:not(.active){color:var(--tx)}
+.sec{display:none}.sec.active{display:block}
+.card{background:var(--bg);border:.5px solid var(--bd);border-radius:var(--rl);padding:1.25rem;margin-bottom:1rem}
+label{font-size:13px;color:var(--tx2);display:block;margin-bottom:5px}
+select,input{width:100%;padding:8px 10px;font-size:13px;border-radius:var(--rm);border:.5px solid var(--bd2);background:var(--bg);color:var(--tx);font-family:var(--font);margin-bottom:10px;outline:none}
+select:focus,input:focus{border-color:rgba(0,0,0,.4);box-shadow:0 0 0 2px rgba(0,0,0,.06)}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.r4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.btn{padding:7px 13px;border-radius:var(--rm);border:.5px solid var(--bd2);background:var(--bg);color:var(--tx);font-size:13px;font-weight:500;cursor:pointer;font-family:var(--font);display:inline-flex;align-items:center;gap:5px}
+.btn-p{background:var(--tx);color:var(--bg);border-color:var(--tx)}.btn:hover{background:var(--bg2)}.btn-p:hover{opacity:.85;background:var(--tx)}
+.btn-grn{background:var(--bgs);color:var(--txs);border-color:var(--txs)}.btn-grn:hover{opacity:.85}
+.met{background:var(--bg2);border-radius:var(--rm);padding:.9rem;text-align:center}
+.mv{font-size:22px;font-weight:500;margin-bottom:3px}.ml{font-size:11px;color:var(--tx2)}
+.bdg{padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;display:inline-block}
+.bp{background:var(--bgw);color:var(--txw)}.bs{background:var(--bgs);color:var(--txs)}.br{background:var(--bgd);color:var(--txd)}.bi{background:var(--bgi);color:var(--txi)}.bn{background:var(--bg2);color:var(--tx2)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{font-size:11px;font-weight:500;color:var(--tx2);text-transform:uppercase;letter-spacing:.04em;padding:8px 10px;text-align:left;border-bottom:.5px solid var(--bd)}
+td{padding:9px 10px;border-bottom:.5px solid var(--bd);vertical-align:middle}
+tr:last-child td{border-bottom:none}tr:hover td{background:var(--bg2)}
+.act{font-size:12px;padding:3px 8px;border-radius:var(--rm);border:.5px solid var(--bd2);background:transparent;cursor:pointer;color:var(--tx2);font-family:var(--font);margin-right:3px}
+.act:hover{background:var(--bg2)}
+.fbar{display:flex;gap:8px;align-items:center;margin-bottom:1rem;flex-wrap:wrap}
+.fbar select,.fbar input{margin-bottom:0;width:auto;min-width:150px}
+.ch{display:inline-block;padding:1px 7px;border-radius:12px;font-size:11px;font-weight:500;white-space:nowrap}
+.ch1{background:var(--bgs);color:var(--txs)}.ch2{background:var(--bgw);color:var(--txw)}.ch3{background:var(--bgd);color:var(--txd)}
+.ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center}
+.ov.open{display:flex}
+.modal{background:var(--bg);border-radius:var(--rl);border:.5px solid var(--bd2);padding:1.5rem;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.mt{font-size:15px;font-weight:500;margin-bottom:1rem}.fe{display:flex;justify-content:flex-end;gap:8px;margin-top:1rem}
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:var(--rm);font-size:13px;opacity:0;transform:translateY(8px);transition:all .2s;z-index:200;max-width:320px;pointer-events:none}
+.toast.show{opacity:1;transform:translateY(0)}
+.av{width:28px;height:28px;border-radius:50%;background:var(--bgi);color:var(--txi);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;flex-shrink:0}
+.nc{display:flex;align-items:center;gap:8px}.prom{font-size:10px;color:var(--txi)}.shd{font-size:15px;font-weight:500;margin-bottom:1rem}
+.cor{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:.5px solid var(--bd);font-size:13px;gap:8px}.cor:last-child{border-bottom:none}
+.pbar{height:5px;border-radius:3px;background:var(--bg2);overflow:hidden;margin-top:6px}.pfill{height:100%;border-radius:3px;transition:width .4s}
+.rrow{display:grid;grid-template-columns:200px 46px 155px 155px 76px 85px;gap:8px;align-items:center;padding:9px 8px;border-bottom:.5px solid var(--bd);font-size:12px}
+.rhd{font-size:11px;font-weight:500;color:var(--tx2);text-transform:uppercase;letter-spacing:.04em}
+.rrow:last-child{border-bottom:none}.rrow:hover{background:var(--bg2);border-radius:var(--rm)}
+.ox{overflow-x:auto}
+/* Excel import banner shown when no student data is loaded */
+.no-data{text-align:center;padding:3rem 1rem;color:var(--tx2)}
+.no-data i{font-size:36px;display:block;margin-bottom:12px;color:var(--tx3)}
+.no-data p{font-size:14px;margin-bottom:1.25rem}
+/* Excel status pill in header */
+.xl-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:12px}
+.xl-none{background:var(--bgd);color:var(--txd)}
+.xl-ok{background:var(--bgs);color:var(--txs)}
+@media(max-width:600px){.r2,.r3,.r4{grid-template-columns:1fr 1fr}.body{padding:1rem}.rrow{grid-template-columns:1fr 1fr 1fr}}
+/* ── CALENDAR STYLES ─────────────────────────────────────── */
+.cal-dow{padding:8px 6px;font-size:11px;font-weight:500;color:var(--tx2);text-transform:uppercase;letter-spacing:.05em;text-align:center;background:var(--bg2)}
+.cal-day{min-height:90px;padding:6px;border-right:.5px solid var(--bd);border-bottom:.5px solid var(--bd);cursor:pointer;transition:background .1s;position:relative;vertical-align:top}
+.cal-day:hover{background:var(--bg2)}
+.cal-day.today{background:var(--bgi)}
+.cal-day.other-month .cal-day-num{color:var(--tx3)}
+.cal-day.other-month{background:var(--bg2);opacity:.6}
+.cal-day-num{font-size:13px;font-weight:500;margin-bottom:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.cal-day.today .cal-day-num{background:var(--tx);color:var(--bg)}
+.cal-iv{font-size:10px;padding:2px 5px;border-radius:4px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:500}
+.cal-iv.bp{background:var(--bgw);color:var(--txw)}
+.cal-iv.bs{background:var(--bgs);color:var(--txs)}
+.cal-iv.br{background:var(--bgd);color:var(--txd)}
+.cal-more{font-size:10px;color:var(--txi);padding:2px 4px;cursor:pointer}
+/* 7th column (Sunday) - remove right border */
+.cal-day:nth-child(7n){border-right:none}
+.loading{position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:2rem;text-align:center}
+.spinner{width:28px;height:28px;border:2px solid var(--bd);border-top-color:var(--tx2);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.db-bdg{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 8px;border-radius:12px;background:var(--bgs);color:var(--txs)}
+</style>
+</head>
+<body>
+<div class="loading" id="loading" style="display:none">
+  <div class="spinner" id="spin"></div>
+  <p id="load-msg" style="font-size:14px;color:var(--tx2)">Connecting to database...</p>
+  <p id="load-sub" style="font-size:12px;color:var(--tx3);max-width:360px;line-height:1.6;text-align:center"></p>
+</div>
+<div id="app">
+<div class="wrap">
+
+  <!-- ── HEADER ───────────────────────────────────────────── -->
+  <div class="hdr">
+    <div style="width:36px;height:36px;border-radius:var(--rm);background:var(--bgi);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <i class="ti ti-briefcase" style="font-size:18px;color:var(--txi)"></i>
+    </div>
+    <div>
+      <h1>Internship Interview Scheduler</h1>
+      <p id="hdr-sub">No Excel file loaded &nbsp;&#183;&nbsp;
+        <span class="xl-pill xl-none"><i class="ti ti-table-off"></i> No student data</span>
+        &nbsp;&#183;&nbsp; <span class="db-bdg" id="db-status"><i class="ti ti-database-off"></i> DB offline</span>
+      </p>
+    </div>
+    <div class="hdr-btns">
+      <!-- Load from Excel: pick a .xlsx file and parse it with SheetJS -->
+      <label class="btn btn-grn" style="cursor:pointer;margin:0">
+        <i class="ti ti-table-import"></i> Load Excel
+        <input type="file" id="xl-input" accept=".xlsx,.xls" onchange="loadExcel(event)" style="display:none">
+      </label>
+      <button class="btn" onclick="exportData()" title="Export all data to JSON backup">
+        <i class="ti ti-download"></i> Export
+      </button>
+      <label class="btn" style="cursor:pointer;margin:0" title="Restore from a JSON backup">
+        <i class="ti ti-upload"></i> Import
+        <input type="file" id="json-input" accept=".json" onchange="importData(event)" style="display:none">
+      </label>
+      <button class="btn" onclick="confirmReset()" style="color:var(--txd);border-color:var(--txd)" title="Reset interviews and choice edits">
+        <i class="ti ti-rotate"></i> Reset
+      </button>
+      <button class="btn" onclick="purgeAll()" style="color:#fff;background:var(--txd);border-color:var(--txd)" title="Wipe ALL data including students">
+        <i class="ti ti-database-x"></i> Purge
+      </button>
+      <button class="btn" onclick="sbSyncAll()" style="color:var(--txs);border-color:var(--txs)" title="Push all local data to Supabase">
+        <i class="ti ti-cloud-upload"></i> Sync DB
+      </button>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="tabs">
+      <button class="tab active" onclick="sw('students')"><i class="ti ti-users"></i> Students</button>
+      <button class="tab" onclick="sw('schedule')"><i class="ti ti-calendar-event"></i> Interviews</button>
+      <button class="tab" onclick="sw('companies')"><i class="ti ti-building"></i> Companies</button>
+      <button class="tab" onclick="sw('report')"><i class="ti ti-chart-bar"></i> Report</button>
+      <button class="tab" onclick="sw('calendar')"><i class="ti ti-calendar-month"></i> Calendar</button>
+    </div>
+
+    <!-- ── STUDENTS TAB ──────────────────────────────────── -->
+    <div id="students" class="sec active">
+      <div class="r4" style="margin-bottom:1.25rem">
+        <div class="met"><div class="mv" id="m-total">0</div><div class="ml">Total students</div></div>
+        <div class="met"><div class="mv" id="m-ym">0</div><div class="ml">Class YM</div></div>
+        <div class="met"><div class="mv" id="m-yn">0</div><div class="ml">Class YN</div></div>
+        <div class="met"><div class="mv" id="m-yp">0</div><div class="ml">Class YP</div></div>
+      </div>
+      <div class="fbar">
+        <input id="srch" type="text" placeholder="Search name..." oninput="renderStu()" style="min-width:200px;margin-bottom:0">
+        <select id="fcls" onchange="renderStu()" style="width:auto;margin-bottom:0">
+          <option value="">All classes</option>
+        </select>
+      </div>
+      <div class="card" style="padding:0"><div class="ox">
+        <table style="min-width:640px">
+          <thead><tr>
+            <th style="width:32px">#</th>
+            <th style="width:185px">Student</th>
+            <th style="width:60px">Class</th>
+            <th>1st choice</th><th>2nd choice</th><th>3rd choice</th>
+            <th style="width:80px">Status</th>
+            <th style="width:58px"></th>
+          </tr></thead>
+          <tbody id="sb"></tbody>
+        </table>
+      </div></div>
+    </div>
+
+    <!-- ── INTERVIEWS TAB ────────────────────────────────── -->
+    <div id="schedule" class="sec">
+      <div class="r4" style="margin-bottom:1.25rem">
+        <div class="met"><div class="mv" id="ms-t">0</div><div class="ml">Scheduled</div></div>
+        <div class="met"><div class="mv" id="ms-p" style="color:var(--txw)">0</div><div class="ml">Pending</div></div>
+        <div class="met"><div class="mv" id="ms-s" style="color:var(--txs)">0</div><div class="ml">Success</div></div>
+        <div class="met"><div class="mv" id="ms-r" style="color:var(--txd)">0</div><div class="ml">Rejected</div></div>
+      </div>
+      <div class="card">
+        <p class="shd">Schedule interview</p>
+        <div class="r2">
+          <div><label>Student</label>
+            <select id="i-stu" onchange="onSC()" style="margin-bottom:10px">
+              <option value="">Select student...</option>
+            </select>
+          </div>
+          <div><label>Company (current 1st choice)</label>
+            <select id="i-co" style="margin-bottom:10px">
+              <option>-- select student first --</option>
+            </select>
+          </div>
+        </div>
+        <div class="r2">
+          <div><label>Date &amp; time</label><input id="i-dt" type="datetime-local"></div>
+          <div><label>Status</label>
+            <select id="i-st">
+              <option value="Pending">Pending</option>
+              <option value="Success">Success</option>
+              <option value="Reject">Reject</option>
+            </select>
+          </div>
+        </div>
+        <div class="r2">
+          <div><label>Interview mode</label>
+            <select id="i-mode">
+              <option value="Face to Face">Face to Face</option>
+              <option value="Online">Online</option>
+              <option value="NA">NA (no interview)</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end;padding-bottom:10px">
+            <button class="btn btn-p" onclick="addIv()" style="width:100%"><i class="ti ti-calendar-plus"></i> Schedule</button>
+          </div>
+        </div>
+      </div>
+      <div class="fbar">
+        <select id="f-co" onchange="renderIv()" style="min-width:220px;margin-bottom:0"><option value="">All companies</option></select>
+        <select id="f-fo" onchange="renderIv()" style="margin-bottom:0"><option value="">All choices</option><option value="1">1st choice only</option></select>
+        <select id="f-st" onchange="renderIv()" style="margin-bottom:0"><option value="">All statuses</option><option>Pending</option><option>Success</option><option>Reject</option></select>
+        <select id="f-mode" onchange="renderIv()" style="margin-bottom:0"><option value="">All modes</option><option value="Face to Face">Face to Face</option><option value="Online">Online</option><option value="NA">NA</option></select>
+        <button class="btn" onclick="sendTodayReminders()" style="margin-left:auto;white-space:nowrap;color:var(--txs);border-color:var(--txs)">
+          <i class="ti ti-brand-whatsapp"></i> WhatsApp today's reminders
+        </button>
+      </div>
+      <div class="card" style="padding:0"><div class="ox">
+        <table style="min-width:620px">
+          <thead><tr>
+            <th style="min-width:140px">Student</th>
+            <th style="width:44px">Cls</th>
+            <th>Company</th>
+            <th style="width:62px">Choice</th>
+            <th style="width:130px">Date &amp; time</th>
+            <th style="width:72px">Mode</th>
+            <th style="width:76px">Status</th>
+            <th style="width:72px"></th>
+          </tr></thead>
+          <tbody id="ib"></tbody>
+        </table>
+      </div></div>
+    </div>
+
+    <!-- ── COMPANIES TAB ─────────────────────────────────── -->
+    <div id="companies" class="sec">
+      <div class="card">
+        <p class="shd">Add new company</p>
+        <div class="r2" style="align-items:end">
+          <div><label>Company name</label>
+            <input id="new-co" type="text" placeholder="e.g. Marina Bay Sands - Guest Relations" style="margin-bottom:0">
+          </div>
+          <div>
+            <button class="btn btn-p" onclick="addCo()" style="width:100%;margin-bottom:0">
+              <i class="ti ti-building-plus"></i> Add company
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <p class="shd">All companies <span id="co-ct" style="font-size:13px;font-weight:400;color:var(--tx2)"></span></p>
+        <div id="co-list"></div>
+      </div>
+    </div>
+
+    <!-- ── REPORT TAB ─────────────────────────────────────── -->
+    <div id="report" class="sec">
+      <div class="r3" style="margin-bottom:1.25rem">
+        <div class="met">
+          <div class="mv" id="r-pl" style="color:var(--txs)">0</div>
+          <div class="ml">Placed (success)</div>
+          <div class="pbar"><div class="pfill" id="r-pl-b" style="background:var(--bgs);width:0%"></div></div>
+        </div>
+        <div class="met">
+          <div class="mv" id="r-pe" style="color:var(--txw)">0</div>
+          <div class="ml">Pending result</div>
+          <div class="pbar"><div class="pfill" id="r-pe-b" style="background:var(--bgw);width:0%"></div></div>
+        </div>
+        <div class="met">
+          <div class="mv" id="r-un">0</div>
+          <div class="ml">Not yet scheduled</div>
+          <div class="pbar"><div class="pfill" id="r-un-b" style="background:var(--bd);width:0%"></div></div>
+        </div>
+      </div>
+      <div class="fbar">
+        <input id="r-s" type="text" placeholder="Search name..." oninput="renderRpt()" style="min-width:180px;margin-bottom:0">
+        <select id="r-cl" onchange="renderRpt()" style="width:auto;margin-bottom:0">
+          <option value="">All classes</option>
+        </select>
+        <select id="r-st" onchange="renderRpt()" style="width:auto;margin-bottom:0">
+          <option value="">All statuses</option>
+          <option value="Success">Placed</option>
+          <option value="Pending">Pending</option>
+          <option value="Reject">Rejected</option>
+          <option value="None">Not scheduled</option>
+        </select>
+      </div>
+      <div class="card" style="padding:0"><div class="ox"><div style="min-width:740px">
+        <div class="rrow rhd" style="padding:8px 8px">
+          <div>Student</div><div>Cls</div>
+          <div>Original 1st choice</div>
+          <div>Last interviewed at</div>
+          <div>Attempts</div>
+          <div>Status</div>
+        </div>
+        <div id="rb"></div>
+      </div></div></div>
+    </div>
+
+    <!-- ── CALENDAR TAB ──────────────────────────────────────── -->
+    <div id="calendar" class="sec">
+
+      <!-- Month navigation header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem">
+        <button class="btn" onclick="calNav(-1)" style="padding:7px 14px">
+          <i class="ti ti-chevron-left"></i> Prev
+        </button>
+        <div style="text-align:center">
+          <div id="cal-title" style="font-size:18px;font-weight:500"></div>
+          <div id="cal-count" style="font-size:12px;color:var(--tx2);margin-top:2px"></div>
+        </div>
+        <button class="btn" onclick="calNav(1)" style="padding:7px 14px">
+          Next <i class="ti ti-chevron-right"></i>
+        </button>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="fbar" style="margin-bottom:1rem">
+        <select id="cal-cls" onchange="renderCal()" style="width:auto;margin-bottom:0">
+          <option value="">All classes</option>
+        </select>
+        <select id="cal-st" onchange="renderCal()" style="width:auto;margin-bottom:0">
+          <option value="">All statuses</option>
+          <option value="Pending">Pending</option>
+          <option value="Success">Success</option>
+          <option value="Reject">Reject</option>
+        </select>
+        <button class="btn" onclick="goToday()" style="margin-left:auto">
+          <i class="ti ti-calendar-event"></i> Today
+        </button>
+      </div>
+
+      <!-- Calendar grid card -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <!-- Day-of-week header row -->
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:.5px solid var(--bd)">
+          <div class="cal-dow">Mon</div>
+          <div class="cal-dow">Tue</div>
+          <div class="cal-dow">Wed</div>
+          <div class="cal-dow">Thu</div>
+          <div class="cal-dow">Fri</div>
+          <div class="cal-dow" style="color:var(--tx3)">Sat</div>
+          <div class="cal-dow" style="color:var(--tx3)">Sun</div>
+        </div>
+        <!-- Day cells injected by renderCal() -->
+        <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr)"></div>
+      </div>
+
+      <!-- Day detail panel — shown when a day cell is clicked -->
+      <div id="cal-detail" style="display:none;margin-top:1rem">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+            <p class="shd" id="cal-detail-title" style="margin-bottom:0"></p>
+            <button class="act" onclick="document.getElementById('cal-detail').style.display='none'">
+              <i class="ti ti-x"></i> Close
+            </button>
+          </div>
+          <div id="cal-detail-body"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</div><!-- /#app -->
+<!-- ── MODAL ─────────────────────────────────────────────── -->
+<div class="ov" id="ov">
+  <div class="modal">
+    <p class="mt" id="mod-t">Edit</p>
+    <div id="mod-b"></div>
+    <div class="fe" id="mod-f"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// SECTION 1: STATE
+// RAW  — original student records loaded from Excel.
+//         Rebuilt every time user loads a new Excel file.
+//         Never modified at runtime.
+// ST   — mutable student state (current choices + edit log)
+// cos  — companies list
+// ivs  — interviews list
+// ============================================================
+var RAW = [];   // populated by loadExcel()
+var ST  = {};   // { [idx]: { choices:[c1,c2,c3], log:[] } }
+var cos = [];   // ['Company A', 'Company B', ...]
+var ivs = [];   // [{ id, idx, name, cls, company, rank, dt, status }, ...]
+var eid = null; // id of record being edited in modal
+
+
+// ============================================================
+// SUPABASE CONFIGURATION
+// ============================================================
+var SUPABASE_URL = 'https://hkymmknuhuauepotzyuj.supabase.co';
+var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreW1ta251aHVhdWVwb3R6eXVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NDI1NzQsImV4cCI6MjA5NDIxODU3NH0.hMga_GAu_eWAYN6UAsEalZYYLw_LVeKO4ZVOBPQfqoQ';
+var DB_ONLINE    = false; // tracks if Supabase is reachable
+
+var SB_BASE = SUPABASE_URL + '/rest/v1/';
+var SB_HDR  = {
+  'apikey':        SUPABASE_KEY,
+  'Authorization': 'Bearer ' + SUPABASE_KEY,
+  'Content-Type':  'application/json'
+};
+
+/**
+ * sbFetch — fetch wrapper with AbortController timeout.
+ * Never throws — always returns { data, error }.
+ */
+async function sbFetch(method, path, body, extraHeaders) {
+  var controller = new AbortController();
+  var timer = setTimeout(function(){ controller.abort(); }, 10000);
+  try {
+    var prefer = {};
+    if (method === 'POST' || method === 'PATCH') prefer = { 'Prefer': 'return=representation' };
+    var res = await fetch(SB_BASE + path, {
+      method:  method,
+      headers: Object.assign({}, SB_HDR, prefer, extraHeaders || {}),
+      body:    body ? JSON.stringify(body) : undefined,
+      signal:  controller.signal
+    });
+    clearTimeout(timer);
+    var text = await res.text();
+    var json = text ? JSON.parse(text) : [];
+    if (!res.ok) {
+      var e = Array.isArray(json) ? json[0] : json;
+      var msg = (e && e.message) ? e.message : res.statusText;
+      return { data: null, error: msg };
+    }
+    return { data: Array.isArray(json) ? json : [json], error: null };
+  } catch(e) {
+    clearTimeout(timer);
+    return { data: null, error: e.name === 'AbortError' ? 'timeout' : e.message };
+  }
+}
+
+var sb = {
+  select: function(table, qs) {
+    return sbFetch('GET', table + '?select=*' + (qs ? '&'+qs : ''), null, null);
+  },
+  insert: function(table, rows) {
+    return sbFetch('POST', table, Array.isArray(rows)?rows:[rows], null);
+  },
+  upsert: function(table, rows, conflict) {
+    return sbFetch('POST', table+'?on_conflict='+(conflict||'id'),
+      Array.isArray(rows)?rows:[rows],
+      {'Prefer':'resolution=merge-duplicates,return=minimal'});
+  },
+  update: function(table, patch, col, val) {
+    return sbFetch('PATCH', table+'?'+col+'=eq.'+encodeURIComponent(val), patch, null);
+  },
+  del: function(table, col, val) {
+    return sbFetch('DELETE', table+'?'+col+'=eq.'+encodeURIComponent(val), null, null);
+  }
+};
+
+/** updateDbStatus — show DB online/offline badge in header */
+function updateDbStatus(online) {
+  DB_ONLINE = online;
+  var el = document.getElementById('db-status');
+  if (el) {
+    el.innerHTML = online
+      ? '<i class="ti ti-database"></i> Supabase'
+      : '<i class="ti ti-database-off"></i> DB offline';
+    el.style.background = online ? 'var(--bgs)' : 'var(--bgd)';
+    el.style.color       = online ? 'var(--txs)' : 'var(--txd)';
+  }
+}
+
+/** testConnection — ping Supabase, returns true if reachable */
+async function testConnection() {
+  var r = await sbFetch('GET', 'students?select=idx&limit=1', null, null);
+  return !r.error;
+}
+
+// ── Supabase seed functions ───────────────────────────────────
+
+async function sbSeedStudents() {
+  if (!RAW.length) return;
+  var rows = RAW.map(function(s){
+    return {idx:s.idx, cls:s.cls, name:s.name,
+      choice_1:s.c[0]||null, choice_2:s.c[1]||null, choice_3:s.c[2]||null};
+  });
+  var r = await sb.upsert('students', rows, 'idx');
+  if (r.error) console.warn('seedStudents:', r.error);
+}
+
+async function sbSeedCompanies() {
+  if (!cos.length) return;
+  var r0 = await sb.select('companies','select=name');
+  var existing = new Set((r0.data||[]).map(function(x){return x.name;}));
+  var toInsert = cos.filter(function(c){return !existing.has(c);})
+    .map(function(c){return {name:c};});
+  if (toInsert.length) {
+    var r = await sb.insert('companies', toInsert);
+    if (r.error) console.warn('seedCompanies:', r.error);
+  }
+}
+
+async function sbSeedInterviews() {
+  if (!ivs.length) return;
+  // Upsert is not safe for identity id — insert only missing ones
+  var r0 = await sb.select('interviews','select=id');
+  var existing = new Set((r0.data||[]).map(function(x){ return String(x.id); }));
+  for (var i=0; i<ivs.length; i++) {
+    var iv = ivs[i];
+    if (!existing.has(String(iv.id))) {
+      var row = {idx:iv.idx, name:iv.name, cls:iv.cls, company:iv.company,
+        rank:iv.rank||1, dt:iv.dt, status:iv.status, mode:iv.mode||'Face to Face'};
+      var r = await sb.insert('interviews', [row]);
+      if (!r.error && r.data && r.data[0]) iv.id = r.data[0].id;
+    }
+  }
+}
+
+/** sbSyncAll — push all local state to Supabase */
+async function sbSyncAll() {
+  if (!DB_ONLINE) return;
+  toast('Syncing to database...');
+  await Promise.all([sbSeedStudents(), sbSeedCompanies()]);
+  await sbSeedInterviews();
+  toast('Synced to Supabase');
+}
+
+/** sbLoadAll — load all data from Supabase into memory */
+async function sbLoadAll() {
+  // Load companies
+  var r1 = await sb.select('companies','order=name.asc');
+  if (!r1.error && r1.data && r1.data.length) {
+    cos = r1.data.map(function(r){return r.name;});
+  }
+
+  // Load interviews
+  var r2 = await sb.select('interviews','select=id,idx,name,cls,company,rank,dt,status,mode');
+  if (!r2.error && r2.data) {
+    var loaded = r2.data.map(function(r){
+      return {id:r.id, idx:String(r.idx), name:r.name||'', cls:r.cls||'',
+        company:r.company||'', rank:r.rank||1, dt:r.dt||'',
+        status:r.status||'Pending', mode:r.mode||'Face to Face'};
+    });
+    if (loaded.length > 0) {
+      ivs = loaded;
+      // Cache locally
+      try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
+    }
+  } else if (r2.error) {
+    // Restore from cache
+    try {
+      var c = localStorage.getItem('ims_ivs_cache');
+      if (c && !ivs.length) ivs = JSON.parse(c);
+    } catch(e) {}
+  }
+
+  // Load student state (choices that may have been promoted)
+  var r3 = await sb.select('student_state','select=idx,choice_1,choice_2,choice_3,log');
+  if (!r3.error && r3.data) {
+    r3.data.forEach(function(row){
+      if (ST[row.idx]) {
+        ST[row.idx].choices = [row.choice_1||'', row.choice_2||'', row.choice_3||''];
+        ST[row.idx].log     = row.log || [];
+      }
+    });
+  }
+}
+
+// ============================================================
+// APP VERSION
+// Bump this string whenever the data schema changes.
+// Format: YYYY.MM.DD (date of release)
+// Used in: export filenames, import migration checks,
+//          and the version badge shown in the header.
+// ============================================================
+var APP_VERSION = '2025.05.20';
+var LS_KEY      = 'ims_v3'; // bump key when schema changes
+
+// ============================================================
+// SECTION 2: EXCEL IMPORT
+// Uses SheetJS (loaded via CDN) to read .xlsx files.
+// Expected columns: Student Name, Class, 1st Choice, 2nd Choice, 3rd Choice
+// ============================================================
+
+/**
+ * loadExcel — triggered when user picks a .xlsx file.
+ * Parses the file with SheetJS, builds RAW, initialises ST,
+ * seeds cos from the choices, then refreshes the UI.
+ */
+function loadExcel(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      // Parse the workbook
+      var data     = new Uint8Array(e.target.result);
+      var workbook = XLSX.read(data, { type: 'array' });
+
+      // Use the first sheet
+      var sheetName = workbook.SheetNames[0];
+      var sheet     = workbook.Sheets[sheetName];
+
+      // Convert to array of arrays (raw rows)
+      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+      // Skip header row, parse each student row
+      // Expected: [Student Name, Class, 1st Choice, 2nd Choice, 3rd Choice]
+      var newRAW = [];
+      // Detect column layout from header row.
+      // Supported formats:
+      //   A) Index | Class | Fullname | 1st | 2nd | 3rd  (your current file)
+      //   B) Fullname | Class | 1st | 2nd | 3rd           (no index column)
+      //   C) Index | Fullname | Class | 1st | 2nd | 3rd   (index then name)
+      //
+      // Detection logic: read the header row and find which columns hold
+      // the name, class, and choices by matching known header keywords.
+
+      var headerRow = rows[0] || [];
+      var colName = -1, colCls = -1, colC1 = -1, colC2 = -1, colC3 = -1;
+
+      for (var h = 0; h < headerRow.length; h++) {
+        var hdr = String(headerRow[h] || '').trim().toLowerCase();
+        if (hdr === 'fullname' || hdr === 'name' || hdr === 'student name' || hdr === 'student') colName = h;
+        else if (hdr === 'class' || hdr === 'cls') colCls = h;
+        else if (hdr.indexOf('1st') !== -1) colC1 = h;
+        else if (hdr.indexOf('2nd') !== -1) colC2 = h;
+        else if (hdr.indexOf('3rd') !== -1) colC3 = h;
+      }
+
+      // Fallback: if header detection failed, guess based on whether col 0 is numeric
+      if (colName === -1) {
+        var firstData = rows.length > 1 ? rows[1][0] : '';
+        var hasIndex  = !isNaN(Number(firstData)) && firstData !== '';
+        if (hasIndex) {
+          // Index | Class | Name | c1 | c2 | c3
+          colCls = 1; colName = 2; colC1 = 3; colC2 = 4; colC3 = 5;
+        } else {
+          // Name | Class | c1 | c2 | c3
+          colName = 0; colCls = 1; colC1 = 2; colC2 = 3; colC3 = 4;
+        }
+      }
+
+      for (var i = 1; i < rows.length; i++) {
+        var row  = rows[i];
+        var name = String(row[colName] || '').trim().toUpperCase();
+        var cls  = String(row[colCls]  || '').trim().toUpperCase();
+        var c1   = String(row[colC1]   || '').trim();
+        var c2   = String(row[colC2]   || '').trim();
+        var c3   = String(row[colC3]   || '').trim();
+        if (!name) continue; // skip blank rows
+        // Stable unique key: name + class combination
+        var idx = name + '_' + cls;
+        newRAW.push({ idx: idx, cls: cls, name: name, c: [c1, c2, c3] });
+      }
+
+      if (newRAW.length === 0) {
+        toast('No student rows found. Check the Excel column order.');
+        return;
+      }
+
+      // If students already exist in ST, preserve their state
+      // New students get default state from their Excel choices
+      newRAW.forEach(function(s) {
+        if (!ST[String(s.idx)]) {
+          ST[String(s.idx)] = { choices: s.c.slice(), log: [] };
+        }
+      });
+
+      // Rebuild companies list from all choices (merge with existing cos)
+      var xlCos = Array.from(new Set(newRAW.flatMap(function(s){ return s.c; }).filter(Boolean)));
+      xlCos.forEach(function(c) { if (!cos.includes(c)) cos.push(c); });
+      cos.sort();
+
+      RAW = newRAW;
+      saveData();
+      refreshAll();
+      updateHeader(file.name, newRAW.length);
+      toast('Loaded ' + newRAW.length + ' students from ' + file.name);
+      // Check for today's interviews in case any were already scheduled
+      setTimeout(checkTodayReminders, 600);
+    } catch(err) {
+      toast('Error reading Excel file: ' + err.message);
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = ''; // reset so same file can be re-loaded
+}
+
+/**
+ * updateHeader — update the subtitle showing Excel file name and student count.
+ */
+function updateHeader(filename, count) {
+  var classes = countClasses();
+  document.getElementById('hdr-sub').innerHTML =
+    '<strong>' + count + ' students</strong> from <em>' + filename + '</em>' +
+    ' &nbsp;&#183;&nbsp; ' +
+    '<span class="xl-pill xl-ok"><i class="ti ti-table-check"></i> Excel loaded</span>' +
+    ' &nbsp;&#183;&nbsp; <span style="font-size:11px;color:var(--tx3)">v' + APP_VERSION + '</span>';
+  // Update class filter dropdowns with actual classes found
+  rebuildClassFilters(classes);
+}
+
+/**
+ * countClasses — returns a sorted array of unique class names in RAW.
+ */
+function countClasses() {
+  return Array.from(new Set(RAW.map(function(s){ return s.cls; }))).filter(Boolean).sort();
+}
+
+/**
+ * rebuildClassFilters — rebuild the class dropdowns in Students, Report.
+ */
+function rebuildClassFilters(classes) {
+  ['fcls','r-cl'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">All classes</option>';
+    classes.forEach(function(c) {
+      var o = document.createElement('option');
+      o.value = c; o.textContent = c; sel.appendChild(o);
+    });
+    sel.value = cur;
+  });
+}
+
+// ============================================================
+// SECTION 3: PERSISTENCE (localStorage)
+// Saves RAW, ST, cos, ivs to localStorage so data survives
+// browser restarts. Called after every state change.
+// ============================================================
+
+/** saveData — serialise all state to localStorage */
+function saveData() {
+  // Always save to localStorage
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({ RAW: RAW, ST: ST, cos: cos, ivs: ivs }));
+    localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs));
+  } catch(e) {
+    console.warn('localStorage save failed:', e);
+  }
+}
+
+/** loadData — restore state from localStorage on page load */
+function loadData() {
+  try {
+    var raw = localStorage.getItem(LS_KEY);
+    if (!raw) return false;
+    var d = JSON.parse(raw);
+    if (d.RAW && d.RAW.length) RAW = d.RAW;
+    if (d.ST)  ST  = d.ST;
+    if (d.cos) cos = d.cos;
+    if (d.ivs) ivs = d.ivs;
+    return RAW.length > 0;
+  } catch(e) {
+    console.warn('localStorage load failed:', e);
+    return false;
+  }
+}
+
+/** exportData — download all data as a dated JSON backup file */
+function exportData() {
+  // Include schema version in the export so importData can migrate if needed
+  var data = {
+    schemaVersion: APP_VERSION,
+    RAW: RAW, ST: ST, cos: cos, ivs: ivs,
+    exportedAt: new Date().toISOString()
+  };
+  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  var d    = new Date();
+  a.href   = url;
+  // Filename includes version so you can tell backups apart
+  a.download = 'ims_v' + APP_VERSION + '_backup_' +
+    d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Exported: ims_v' + APP_VERSION + '_backup_...');
+}
+
+/** importData — restore from a JSON backup file */
+function importData(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      var d = JSON.parse(ev.target.result);
+
+      // ── Basic validation ────────────────────────────────────
+      if (!d.ivs) { toast('Invalid backup file — missing interview data'); return; }
+      if (!confirm('Replace all current data with this backup from ' +
+        (d.exportedAt ? new Date(d.exportedAt).toLocaleDateString('en-SG') : 'unknown date') +
+        '?')) return;
+
+      // ── Auto-migration ─────────────────────────────────────
+      // Each migration block handles one schema version upgrade.
+      // Add new blocks here whenever APP_VERSION is bumped.
+      var fromVersion = d.schemaVersion || 'pre-2025';
+
+      // Migration v1 → v2: ensure all idx keys are strings
+      // (older versions stored idx as numbers after JSON round-trip)
+      if (d.RAW && d.RAW.length && typeof d.RAW[0].idx === 'number') {
+        d.RAW = d.RAW.map(function(s) {
+          return { idx: String(s.idx), cls: s.cls, name: s.name, c: s.c };
+        });
+        var newST = {};
+        Object.keys(d.ST || {}).forEach(function(k) { newST[String(k)] = d.ST[k]; });
+        d.ST = newST;
+        d.ivs = (d.ivs || []).map(function(iv) {
+          return Object.assign({}, iv, { idx: String(iv.idx) });
+        });
+        console.log('Migrated: numeric idx -> string idx');
+      }
+
+      // Migration pre-v2025: backfill missing fields on interviews
+      d.ivs = (d.ivs || []).map(function(iv) {
+        if (iv.rank === undefined) iv.rank = 1;           // default to 1st choice
+        if (iv.mode === undefined) iv.mode = 'Face to Face'; // default mode
+        return iv;
+      });
+
+      // Migration: ensure RAW exists (very old backups may only have ivs)
+      if (!d.RAW) d.RAW = [];
+      if (!d.ST)  d.ST  = {};
+      if (!d.cos) d.cos = [];
+
+      // ── Apply data ─────────────────────────────────────────
+      RAW = d.RAW;
+      ST  = d.ST;
+      cos = d.cos;
+      ivs = d.ivs;
+
+      saveData();
+      refreshAll();
+      if (RAW.length) updateHeader('backup file', RAW.length);
+
+      var migratedMsg = (fromVersion !== APP_VERSION) ?
+        ' (migrated from v' + fromVersion + ')' : '';
+      toast('Imported successfully' + migratedMsg);
+
+    } catch(err) {
+      toast('Could not read file — is it a valid backup?');
+      console.error('Import error:', err);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+/** confirmReset — clear all interview data, restore choices from RAW */
+function confirmReset() {
+  if (!confirm('Reset all interviews and choice edits? Student data from Excel stays.')) return;
+  ST  = {};
+  ivs = [];
+  // Rebuild ST from RAW
+  RAW.forEach(function(s) { ST[String(s.idx)] = { choices: s.c.slice(), log: [] }; });
+  // Rebuild cos from RAW choices
+  cos = Array.from(new Set(RAW.flatMap(function(s){ return s.c; }).filter(Boolean))).sort();
+  saveData();
+  refreshAll();
+  toast('All interview data has been reset');
+}
+
+/**
+ * purgeAll — wipe EVERYTHING: students, interviews, companies,
+ * choice edits, and the localStorage entry.
+ * Requires the user to type PURGE to confirm — prevents accidents.
+ */
+function purgeAll() {
+  var confirm1 = confirm(
+    'WARNING: This will delete ALL data including students, interviews, and companies.\n\n' +
+    'You will need to reload your Excel file afterwards.\n\n' +
+    'Are you sure you want to continue?'
+  );
+  if (!confirm1) return;
+
+  var typed = window.prompt('Type PURGE (all caps) to confirm:');
+  if (typed !== 'PURGE') { toast('Purge cancelled — you must type PURGE exactly'); return; }
+
+  // Wipe all in-memory state
+  RAW = [];
+  ST  = {};
+  cos = [];
+  ivs = [];
+
+  // Remove from localStorage entirely
+  try { localStorage.removeItem(LS_KEY); } catch(e) {}
+
+  // Reset UI
+  document.getElementById('hdr-sub').innerHTML =
+    'No Excel file loaded &nbsp;&#183;&nbsp; ' +
+    '<span class="xl-pill xl-none"><i class="ti ti-table-off"></i> No student data</span>' +
+    ' &nbsp;&#183;&nbsp; <span style="font-size:11px;color:var(--tx3)">v' + APP_VERSION + '</span>';
+  refreshAll();
+  toast('All data has been purged. Please load your Excel file.');
+}
+
+// ============================================================
+// SECTION 4: UI HELPERS
+// ============================================================
+
+/** ini — generate 2-letter avatar initials from a name */
+function ini(name) {
+  return name.split(' ').map(function(w){ return w[0]; }).join('').toUpperCase().slice(0,2);
+}
+
+/** sw — switch active tab */
+function sw(t) {
+  var names = ['students','schedule','companies','report','calendar'];
+  document.querySelectorAll('.tab').forEach(function(b,i){
+    b.classList.toggle('active', names[i]===t);
+  });
+  document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('active'); });
+  document.getElementById(t).classList.add('active');
+  if (t==='report')    renderRpt();
+  if (t==='companies') renderCos();
+  if (t==='calendar')  renderCal();
+  mets();
+}
+
+/** mets — update all metric tile numbers */
+function mets() {
+  document.getElementById('m-total').textContent = RAW.length;
+  document.getElementById('m-ym').textContent = RAW.filter(function(s){return s.cls==='YM';}).length;
+  document.getElementById('m-yn').textContent = RAW.filter(function(s){return s.cls==='YN';}).length;
+  document.getElementById('m-yp').textContent = RAW.filter(function(s){return s.cls==='YP';}).length;
+  document.getElementById('ms-t').textContent = ivs.length;
+  document.getElementById('ms-p').textContent = ivs.filter(function(i){return i.status==='Pending';}).length;
+  document.getElementById('ms-s').textContent = ivs.filter(function(i){return i.status==='Success';}).length;
+  document.getElementById('ms-r').textContent = ivs.filter(function(i){return i.status==='Reject';}).length;
+}
+
+/** refreshAll — re-render every section and metrics */
+function refreshAll() {
+  popStuSel();
+  popCoFil();
+  renderStu();
+  renderIv();
+  mets();
+  var classes = countClasses();
+  rebuildClassFilters(classes);
+  // Rebuild calendar class filter when data changes
+  var calClsSel = document.getElementById('cal-cls');
+  if (calClsSel) {
+    calClsSel.innerHTML = '<option value="">All classes</option>';
+    classes.forEach(function(c) {
+      var o = document.createElement('option');
+      o.value = c; o.textContent = c; calClsSel.appendChild(o);
+    });
+  }
+  // Re-render calendar if it is the active tab
+  if (document.getElementById('calendar').classList.contains('active')) renderCal();
+}
+
+/** noDataMsg — empty state shown when Excel hasn't been loaded yet */
+function noDataMsg(msg) {
+  return '<tr><td colspan="7"><div class="no-data">' +
+    '<i class="ti ti-table-import"></i>' +
+    '<p>' + (msg || 'No student data. Click <strong>Load Excel</strong> to import your file.') + '</p>' +
+    '</div></td></tr>';
+}
+
+// ============================================================
+// SECTION 5: DROPDOWNS
+// ============================================================
+
+/** popStuSel — populate student dropdown in schedule form */
+function popStuSel() {
+  var sel = document.getElementById('i-stu');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">Select student...</option>';
+  RAW.slice().sort(function(a,b){ return a.name.localeCompare(b.name); })
+    .forEach(function(s) {
+      var o = document.createElement('option');
+      o.value = String(s.idx);
+      o.textContent = s.name + ' (' + s.cls + ')';
+      sel.appendChild(o);
+    });
+  sel.value = cur;
+}
+
+/** popCoFil — populate company filter above interview table */
+function popCoFil() {
+  var sel = document.getElementById('f-co');
+  sel.innerHTML = '<option value="">All companies</option>';
+  cos.forEach(function(c) {
+    var o = document.createElement('option');
+    o.value = c; o.textContent = c; sel.appendChild(o);
+  });
+}
+
+/** onSC — when student selected in schedule form, auto-fill company */
+function onSC() {
+  var idx = document.getElementById('i-stu').value; // keep as string
+  var sel = document.getElementById('i-co');
+  sel.innerHTML = '';
+  if (!idx) { sel.innerHTML = '<option>-- select student first --</option>'; return; }
+  var st = ST[String(idx)] || { choices: [] };
+  var active = st.choices[0];
+  var o = document.createElement('option');
+  o.value = active || ''; o.textContent = active || 'No choices remaining';
+  sel.appendChild(o);
+}
+
+// ============================================================
+// SECTION 6: STUDENTS TAB
+// ============================================================
+
+function renderStu() {
+  var q   = document.getElementById('srch').value.toLowerCase();
+  var cls = document.getElementById('fcls').value;
+  var tb  = document.getElementById('sb');
+
+  if (!RAW.length) { tb.innerHTML = noDataMsg(); return; }
+
+  var rows = RAW.filter(function(s) {
+    if (cls && s.cls !== cls) return false;
+    if (q && !s.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  if (!rows.length) {
+    tb.innerHTML = noDataMsg('No students match your search.');
+    return;
+  }
+
+  tb.innerHTML = rows.map(function(s) {
+    var st = ST[String(s.idx)] || { choices: s.c.slice(), log: [] };
+    return '<tr>' +
+      '<td style="color:var(--tx2);font-size:11px">' + (rows.indexOf(s)+1) + '</td>' +
+      '<td><div class="nc"><div class="av">' + ini(s.name) + '</div><div>' +
+        '<div style="font-weight:500;font-size:12px">' + s.name + '</div>' +
+        (st.log.length ? '<div class="prom"><i class="ti ti-arrow-up" style="font-size:10px"></i> choice promoted</div>' : '') +
+      '</div></div></td>' +
+      '<td><span class="bdg bi">' + s.cls + '</span></td>' +
+      '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (st.choices[0]||'') + '">' + (st.choices[0]||'&mdash;') + '</td>' +
+      '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tx2)" title="' + (st.choices[1]||'') + '">' + (st.choices[1]||'&mdash;') + '</td>' +
+      '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tx2)" title="' + (st.choices[2]||'') + '">' + (st.choices[2]||'&mdash;') + '</td>' +
+      '<td>' + stuStatusBadge(s.idx) + '</td>' +
+      '<td>' +
+        '<button class="act stu-edit" data-idx="' + encodeURIComponent(s.idx) + '" title="Edit choices"><i class="ti ti-edit"></i></button>' +
+        (!isPlaced(s.idx) ? '<button class="act stu-place" data-idx="' + encodeURIComponent(s.idx) + '" style="color:var(--txs)" title="Mark as placed"><i class="ti ti-check"></i></button>' : '') +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+/** coOpts — build <option> list for company dropdowns in edit modal */
+/**
+ * isPlaced — returns true if student has a Success interview or direct placement
+ */
+function isPlaced(idx) {
+  return ivs.some(function(iv){ return String(iv.idx)===String(idx) && iv.status==='Success'; });
+}
+
+/**
+ * hasPending — returns true if student has any Pending interview
+ */
+function hasPending(idx) {
+  return ivs.some(function(iv){ return String(iv.idx)===String(idx) && iv.status==='Pending'; });
+}
+
+/**
+ * stuStatusBadge — returns the HTML badge for a student's current placement status
+ */
+function stuStatusBadge(idx) {
+  if (isPlaced(idx))   return '<span class="bdg bs">Placed</span>';
+  if (hasPending(idx)) return '<span class="bdg bp">Pending</span>';
+  if (ivs.some(function(iv){ return String(iv.idx)===String(idx); }))
+    return '<span class="bdg br">Rejected</span>';
+  return '<span class="bdg bn">Not started</span>';
+}
+
+/**
+ * markPlaced — directly mark a student as placed without a formal interview.
+ * Creates a special interview record with mode "Direct" and status "Success".
+ */
+function markPlaced(idx) {
+  idx = String(idx); // ensure string type
+  var s = RAW.find(function(r){ return String(r.idx)===idx; });
+  if (!s) { toast('Student not found'); return; }
+  if (!confirm('Mark ' + s.name + ' as placed directly (no interview)?')) return;
+
+  var company = ST[String(idx)] ? (ST[String(idx)].choices[0] || 'Direct placement') : 'Direct placement';
+  var id = Date.now();
+  ivs.push({
+    id: id,
+    idx: String(idx),
+    name: s.name,
+    cls: s.cls,
+    company: company,
+    rank: 1,
+    dt: new Date().toISOString().slice(0,16),
+    status: 'Success',
+    mode: 'NA'
+  });
+  saveData();
+  renderStu();
+  renderIv();
+  mets();
+  toast(s.name.split(' ')[0] + ' marked as placed');
+}
+
+function coOpts(selected) {
+  var h = '<option value="">-- none --</option>';
+  cos.forEach(function(c) {
+    h += '<option value="' + c + '"' + (c===selected?' selected':'') + '>' + c + '</option>';
+  });
+  return h;
+}
+
+/** openES — open Edit Student choices modal */
+function openES(idx) {
+  idx = String(idx); // ensure string type
+  var s  = RAW.find(function(r){ return String(r.idx)===idx; });
+  if (!s) { toast('Student not found'); return; }
+  var st = ST[idx] || { choices: ['','',''], log: [] };
+  eid    = idx;
+  document.getElementById('mod-t').textContent = 'Edit choices \u2014 ' + s.name;
+  document.getElementById('mod-b').innerHTML =
+    '<p style="font-size:12px;color:var(--tx2);margin-bottom:12px">Reassign any of the 3 choices. Leave blank to clear a slot.</p>' +
+    '<label>1st choice</label><select id="e-c1">' + coOpts(st.choices[0]) + '</select>' +
+    '<label>2nd choice</label><select id="e-c2">' + coOpts(st.choices[1]) + '</select>' +
+    '<label>3rd choice</label><select id="e-c3">' + coOpts(st.choices[2]) + '</select>';
+  document.getElementById('mod-f').innerHTML =
+    '<button class="btn" onclick="closeMod()">Cancel</button>' +
+    '<button class="btn btn-p" onclick="saveES()">Save choices</button>';
+  document.getElementById('ov').classList.add('open');
+}
+
+function saveES() {
+  var choices = [
+    document.getElementById('e-c1').value,
+    document.getElementById('e-c2').value,
+    document.getElementById('e-c3').value
+  ];
+  var newLog = (ST[eid].log || []).concat(['manually edited']);
+  ST[String(eid)] = { choices: choices, log: newLog };
+  saveData();
+  renderStu(); onSC(); closeMod(); toast('Choices updated');
+}
+
+// ============================================================
+// SECTION 7: INTERVIEWS TAB
+// ============================================================
+
+/**
+ * modeBadge — returns a styled badge for the interview mode
+ */
+function modeBadge(mode) {
+  if (mode === 'Face to Face') return '<span class="bdg bi" style="font-size:10px">F2F</span>';
+  if (mode === 'Online')       return '<span class="bdg bp" style="font-size:10px">Online</span>';
+  return '<span class="bdg bn" style="font-size:10px">NA</span>';
+}
+
+function renderIv() {
+  var co = document.getElementById('f-co').value;
+  var fo = document.getElementById('f-fo').value;
+  var st = document.getElementById('f-st').value;
+  var tb = document.getElementById('ib');
+
+  if (!RAW.length) {
+    tb.innerHTML = '<tr><td colspan="7"><div class="no-data"><i class="ti ti-table-import"></i><p>Load Excel file first to schedule interviews.</p></div></td></tr>';
+    return;
+  }
+
+  var modeF = document.getElementById('f-mode') ? document.getElementById('f-mode').value : '';
+  var rows = ivs.filter(function(iv) {
+    if (co && iv.company !== co) return false;
+    if (fo === '1' && iv.rank !== 1) return false;
+    if (st && iv.status !== st) return false;
+    if (modeF && (iv.mode||'Face to Face') !== modeF) return false;
+    return true;
+  });
+
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--tx2)">No interviews match the current filters</td></tr>';
+    return;
+  }
+
+  var bc = { Pending:'bp', Success:'bs', Reject:'br' };
+  var cc = ['','ch1','ch2','ch3'];
+  var cl = ['','1st','2nd','3rd'];
+
+  tb.innerHTML = rows.map(function(iv) {
+    var d  = new Date(iv.dt);
+    var ds = isNaN(d) ? '--'
+      : d.toLocaleDateString('en-SG',{day:'numeric',month:'short'}) + ' '
+      + d.toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
+    return '<tr>' +
+      '<td style="font-weight:500;white-space:normal;word-break:break-word;min-width:130px">' + iv.name + '</td>' +
+      '<td><span class="bdg bi">' + iv.cls + '</span></td>' +
+      '<td title="' + iv.company + '" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + iv.company + '</td>' +
+      '<td><span class="ch ' + (cc[iv.rank]||'') + '">' + (cl[iv.rank]||'--') + '</span></td>' +
+      '<td style="color:var(--tx2);font-size:12px">' + ds + '</td>' +
+      '<td>' + modeBadge(iv.mode) + '</td>' +
+      '<td><span class="bdg ' + bc[iv.status] + '">' + iv.status + '</span></td>' +
+      '<td>' +
+        '<button class="act" onclick="openEI(' + iv.id + ')" title="Edit"><i class="ti ti-edit"></i></button>' +
+        '<button class="act" style="color:var(--txd)" onclick="delIv(' + iv.id + ')" title="Delete"><i class="ti ti-trash"></i></button>' +
+        '<button class="act" style="color:var(--txi)" onclick="sendWAReminder(' + iv.id + ')" title="WhatsApp reminder"><i class="ti ti-brand-whatsapp"></i></button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function addIv() {
+  var sidx    = String(document.getElementById('i-stu').value); // string key
+  var company = document.getElementById('i-co').value;
+  var dt      = document.getElementById('i-dt').value;
+  var status  = document.getElementById('i-st').value;
+
+  if (!sidx || !company || !dt) { toast('Please fill in all fields'); return; }
+
+  var s    = RAW.find(function(r){ return String(r.idx)===sidx; });
+  if (!s)  { toast('Student not found'); return; }
+  var rank = (ST[sidx] ? ST[sidx].choices.indexOf(company) + 1 : 0) || 1;
+  var id   = Date.now();
+
+  var mode = document.getElementById('i-mode') ? document.getElementById('i-mode').value : 'Face to Face';
+  ivs.push({ id:id, idx:sidx, name:s.name, cls:s.cls, company:company, rank:rank, dt:dt, status:status, mode:mode });
+
+  // Auto-promote choices if rejected immediately
+  if (status === 'Reject') promote(sidx);
+
+  saveData();
+  // Also save to Supabase if online
+  if (DB_ONLINE) {
+    var sbRow = {idx:sidx, name:s.name, cls:s.cls, company:company,
+      rank:rank, dt:dt, status:status, mode:mode};
+    sb.insert('interviews', [sbRow]).then(function(r) {
+      if (!r.error && r.data && r.data[0]) {
+        // Update local id with Supabase-generated id
+        var last = ivs[ivs.length-1];
+        if (last) last.id = r.data[0].id;
+        saveData();
+      }
+    });
+  }
+  renderIv(); renderStu(); mets(); onSC();
+  if (document.getElementById('calendar').classList.contains('active')) renderCal();
+  toast('Interview scheduled for ' + s.name.split(' ')[0]);
+}
+
+/**
+ * promote — shift choices up after rejection.
+ * Removes 1st choice, promotes 2nd to 1st, 3rd to 2nd.
+ */
+function promote(idx) {
+  var st = ST[String(idx)];
+  if (!st) return;
+  var removed = st.choices.shift();
+  st.choices.push('');
+  st.log.push('rejected: ' + (removed || '').split(' - ')[0]);
+  var s   = RAW.find(function(r){ return r.idx===idx; });
+  var nxt = st.choices[0];
+  toast((s ? s.name.split(' ')[0] : 'Student') + ': ' +
+    (nxt ? 'promoted \u2192 ' + nxt.split(' - ')[0] : 'no choices left'));
+}
+
+function openEI(id) {
+  eid = id;
+  var iv = ivs.find(function(i){ return i.id===id; });
+  document.getElementById('mod-t').textContent = 'Edit interview';
+  var ivMode = iv.mode || 'Face to Face';
+  document.getElementById('mod-b').innerHTML =
+    '<label>Date &amp; time</label><input type="datetime-local" id="e-dt" value="' + iv.dt + '">' +
+    '<label>Status</label>' +
+    '<select id="e-st">' +
+      '<option value="Pending"' + (iv.status==='Pending'?' selected':'') + '>Pending</option>' +
+      '<option value="Success"' + (iv.status==='Success'?' selected':'') + '>Success</option>' +
+      '<option value="Reject"'  + (iv.status==='Reject' ?' selected':'') + '>Reject</option>' +
+    '</select>' +
+    '<label>Interview mode</label>' +
+    '<select id="e-mode">' +
+      '<option value="Face to Face"' + (ivMode==='Face to Face'?' selected':'') + '>Face to Face</option>' +
+      '<option value="Online"'       + (ivMode==='Online'      ?' selected':'') + '>Online</option>' +
+      '<option value="NA"'           + (ivMode==='NA'          ?' selected':'') + '>NA (no interview)</option>' +
+    '</select>';
+  document.getElementById('mod-f').innerHTML =
+    '<button class="btn" onclick="closeMod()">Cancel</button>' +
+    '<button class="btn btn-p" onclick="saveEI()">Save</button>';
+  document.getElementById('ov').classList.add('open');
+}
+
+function saveEI() {
+  var iv  = ivs.find(function(i){ return i.id===eid; });
+  var old = iv.status;
+  iv.dt     = document.getElementById('e-dt').value;
+  iv.status = document.getElementById('e-st').value;
+  iv.mode   = document.getElementById('e-mode') ? document.getElementById('e-mode').value : (iv.mode || 'Face to Face');
+  if (old !== 'Reject' && iv.status === 'Reject') promote(String(iv.idx));
+  saveData();
+  if (DB_ONLINE) {
+    sb.update('interviews', {dt:iv.dt, status:iv.status, mode:iv.mode}, 'id', iv.id);
+  }
+  renderIv(); renderStu(); mets(); onSC();
+  if (document.getElementById('calendar').classList.contains('active')) renderCal();
+  closeMod(); toast('Interview updated');
+}
+
+function delIv(id) {
+  if (!confirm('Delete this interview record?')) return;
+  ivs = ivs.filter(function(i){ return i.id !== id; });
+  saveData();
+  if (DB_ONLINE) sb.del('interviews', 'id', id);
+  renderIv(); mets();
+  if (document.getElementById('calendar').classList.contains('active')) renderCal();
+}
+
+// ============================================================
+// SECTION 8: COMPANIES TAB
+// ============================================================
+
+function renderCos() {
+  document.getElementById('co-ct').textContent = '(' + cos.length + ')';
+  var list = document.getElementById('co-list');
+  if (!cos.length) {
+    list.innerHTML = '<p style="color:var(--tx2);font-size:13px;padding:1rem 0">No companies yet. Load an Excel file or add manually.</p>';
+    return;
+  }
+  list.innerHTML = cos.map(function(c,i) {
+    return '<div class="cor"><span>' + c + '</span>' +
+      '<div style="display:flex;gap:6px;flex-shrink:0">' +
+        '<button class="act" onclick="openEC(' + i + ')"><i class="ti ti-edit"></i></button>' +
+        '<button class="act" style="color:var(--txd)" onclick="delCo(' + i + ')"><i class="ti ti-trash"></i></button>' +
+      '</div></div>';
+  }).join('');
+}
+
+function addCo() {
+  var v = document.getElementById('new-co').value.trim();
+  if (!v) { toast('Enter a company name'); return; }
+  if (cos.includes(v)) { toast('Company already exists'); return; }
+  cos.push(v); cos.sort();
+  document.getElementById('new-co').value = '';
+  saveData();
+  if (DB_ONLINE) sb.insert('companies', [{name:v}]);
+  renderCos(); popCoFil(); toast('Added: ' + v.split(' - ')[0]);
+}
+
+function openEC(i) {
+  eid = i;
+  document.getElementById('mod-t').textContent = 'Edit company';
+  document.getElementById('mod-b').innerHTML =
+    '<label>Company name</label><input id="e-cn" type="text" value="' + cos[i] + '" style="margin-bottom:0">';
+  document.getElementById('mod-f').innerHTML =
+    '<button class="btn" onclick="closeMod()">Cancel</button>' +
+    '<button class="btn btn-p" onclick="saveEC()">Save</button>';
+  document.getElementById('ov').classList.add('open');
+}
+
+function saveEC() {
+  var v = document.getElementById('e-cn').value.trim();
+  if (!v) { toast('Name cannot be empty'); return; }
+  var old = cos[eid];
+  cos[eid] = v; cos.sort();
+  // Cascade rename to student states
+  RAW.forEach(function(s) {
+    var st = ST[String(s.idx)];
+    if (!st) return;
+    st.choices = st.choices.map(function(c){ return c===old ? v : c; });
+  });
+  // Cascade rename to interviews
+  ivs.forEach(function(iv){ if (iv.company===old) iv.company = v; });
+  saveData();
+  if (DB_ONLINE) {
+    sb.update('companies', {name:v}, 'name', old);
+    sb.update('interviews', {company:v}, 'company', old);
+  }
+  renderCos(); renderStu(); renderIv(); popCoFil(); closeMod(); toast('Company renamed');
+}
+
+function delCo(i) {
+  if (!confirm('Remove "' + cos[i] + '" from the list?')) return;
+  var name = cos[i];
+  cos.splice(i, 1);
+  saveData();
+  if (DB_ONLINE) sb.del('companies', 'name', name);
+  renderCos(); popCoFil(); toast('Removed: ' + name.split(' - ')[0]);
+}
+
+// ============================================================
+// SECTION 9: REPORT TAB
+// ============================================================
+
+function renderRpt() {
+  var q   = document.getElementById('r-s').value.toLowerCase();
+  var cls = document.getElementById('r-cl').value;
+  var stf = document.getElementById('r-st').value;
+  var total = RAW.length || 1;
+
+  var plIdx  = new Set(ivs.filter(function(i){return i.status==='Success';}).map(function(i){return i.idx;}));
+  var peIdx  = new Set(ivs.filter(function(i){return i.status==='Pending';}).map(function(i){return i.idx;}));
+  var schIdx = new Set(ivs.map(function(i){return i.idx;}));
+  var un     = RAW.filter(function(s){return !schIdx.has(s.idx);}).length;
+
+  document.getElementById('r-pl').textContent = plIdx.size;
+  document.getElementById('r-pe').textContent = peIdx.size;
+  document.getElementById('r-un').textContent = un;
+  document.getElementById('r-pl-b').style.width = Math.round(plIdx.size/total*100) + '%';
+  document.getElementById('r-pe-b').style.width = Math.round(peIdx.size/total*100) + '%';
+  document.getElementById('r-un-b').style.width = Math.round(un/total*100) + '%';
+
+  var rows = RAW.filter(function(s) {
+    if (cls && s.cls !== cls) return false;
+    if (q && !s.name.toLowerCase().includes(q)) return false;
+    if (stf) {
+      if (stf==='Success' && !plIdx.has(s.idx)) return false;
+      if (stf==='Pending' && !peIdx.has(s.idx)) return false;
+      if (stf==='Reject'  && !ivs.some(function(i){return i.idx===s.idx&&i.status==='Reject';})) return false;
+      if (stf==='None'    && schIdx.has(s.idx)) return false;
+    }
+    return true;
+  }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+
+  var tb = document.getElementById('rb');
+  if (!rows.length) {
+    tb.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--tx2);font-size:13px">No students match</div>';
+    return;
+  }
+
+  tb.innerHTML = rows.map(function(s) {
+    var myIvs = ivs.filter(function(i){return i.idx===s.idx;})
+      .sort(function(a,b){return new Date(b.dt)-new Date(a.dt);});
+    var last  = myIvs[0];
+
+    var badge = '<span class="bdg bn">Not scheduled</span>';
+    if (last) {
+      if      (plIdx.has(s.idx)) badge = '<span class="bdg bs">Placed</span>';
+      else if (peIdx.has(s.idx)) badge = '<span class="bdg bp">Pending</span>';
+      else                       badge = '<span class="bdg br">Rejected</span>';
+    }
+
+    var lco = last ? last.company.split(' - ')[0] : '--';
+    var ldt = last ? (function(){
+      var d = new Date(last.dt);
+      return isNaN(d) ? '' : ' (' + d.toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'2-digit'}) + ')';
+    })() : '';
+
+    // Show ORIGINAL 1st choice from RAW (never the promoted ST value)
+    var orig1 = s.c[0] || '--';
+
+    return '<div class="rrow">' +
+      '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;font-size:12px" title="' + s.name + '">' + s.name + '</div>' +
+      '<div><span class="bdg bi">' + s.cls + '</span></div>' +
+      '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--tx2)" title="' + orig1 + '">' + orig1 + '</div>' +
+      '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--tx2)">' + lco + ldt + '</div>' +
+      '<div style="font-size:12px;color:var(--tx2)">' + (myIvs.length ? myIvs.length + ' iv' + (myIvs.length>1?'s':'') : '--') + '</div>' +
+      '<div>' + badge + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ============================================================
+// SECTION 10: WHATSAPP REMINDERS
+// ============================================================
+
+function sendTodayReminders() {
+  var today    = new Date();
+  var todayIvs = ivs.filter(function(iv) {
+    var d = new Date(iv.dt);
+    return !isNaN(d) &&
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth()    === today.getMonth() &&
+      d.getDate()     === today.getDate();
+  });
+  if (!todayIvs.length) { toast('No interviews scheduled for today'); return; }
+  var rows = todayIvs.map(function(iv,i) {
+    var t = new Date(iv.dt).toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
+    var m = iv.mode || 'Face to Face';
+    return (i+1) + '. ' + iv.name + ' (' + iv.cls + ')\n   Company: ' + iv.company + '\n   Mode: ' + m + '\n   Time: ' + t;
+  }).join('\n\n');
+  var msg = encodeURIComponent(
+    'Internship Interview Reminders\n' +
+    today.toLocaleDateString('en-SG',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) +
+    '\n\n' + rows + '\n\nPlease ensure all students are informed and prepared.');
+  window.open('https://api.whatsapp.com/send?phone=6596505901&text=' + msg);
+}
+
+function sendWAReminder(id) {
+  var iv = ivs.find(function(i){ return i.id===id; });
+  if (!iv) return;
+  var d  = new Date(iv.dt);
+  var t  = isNaN(d) ? '--' : d.toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
+  var dt = isNaN(d) ? '--' : d.toLocaleDateString('en-SG',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  var modeStr = iv.mode || 'Face to Face';
+  var msg = encodeURIComponent(
+    'Internship Interview Reminder\n\n' +
+    'Student : ' + iv.name    + '\n' +
+    'Class   : ' + iv.cls     + '\n' +
+    'Company : ' + iv.company + '\n' +
+    'Mode    : ' + modeStr    + '\n' +
+    'Time    : ' + t           + '\n' +
+    'Date    : ' + dt          + '\n\n' +
+    'Please ensure the student is informed and prepared.');
+  window.open('https://api.whatsapp.com/send?phone=6596505901&text=' + msg);
+}
+
+// ============================================================
+// SECTION 11: MODAL & TOAST
+// ============================================================
+
+function closeMod() { document.getElementById('ov').classList.remove('open'); eid = null; }
+
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove('show'); }, 2800);
+}
+
+document.getElementById('ov').addEventListener('click', function(e) {
+  if (e.target === e.currentTarget) closeMod();
+});
+
+// Delegated event listeners for student table buttons
+// Using data-idx avoids special-character issues in inline onclick attributes
+document.getElementById('sb').addEventListener('click', function(e) {
+  var editBtn  = e.target.closest('.stu-edit');
+  var placeBtn = e.target.closest('.stu-place');
+  if (editBtn) {
+    var idx = decodeURIComponent(editBtn.getAttribute('data-idx'));
+    openES(idx);
+  }
+  if (placeBtn) {
+    var idx = decodeURIComponent(placeBtn.getAttribute('data-idx'));
+    markPlaced(idx);
+  }
+});
+
+// ============================================================
+// SECTION 12: STARTUP
+// 1. Try to restore from localStorage
+// 2. If data exists, render immediately
+// 3. If no data, show the empty state prompting Excel import
+// ============================================================
+(async function init() {
+  // Step 1: Always load from localStorage first (instant)
+  var restored = loadData();
+  if (restored) {
+    refreshAll();
+    var classes = countClasses();
+    rebuildClassFilters(classes);
+    updateHeader('saved session', RAW.length);
+  } else {
+    mets();
+  }
+
+  // Step 2: Try Supabase in background (non-blocking)
+  // Show brief loading indicator
+  var loadingEl = document.getElementById('loading');
+  var loadMsgEl = document.getElementById('load-msg');
+  if (loadingEl && loadMsgEl) {
+    loadingEl.style.display = 'flex';
+    loadMsgEl.textContent = 'Connecting to Supabase...';
+    document.getElementById('app').style.display = 'none';
+  }
+
+  var online = await testConnection();
+  updateDbStatus(online);
+
+  if (online) {
+    // Load latest data from Supabase
+    if (loadMsgEl) loadMsgEl.textContent = 'Loading from database...';
+    await sbLoadAll();
+    refreshAll();
+    if (RAW.length) updateHeader('Supabase', RAW.length);
+  }
+
+  // Show app regardless of DB status
+  if (loadingEl) loadingEl.style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+
+  setTimeout(function(){
+    if (restored || RAW.length) {
+      toast('v' + APP_VERSION + (online ? ' — Supabase connected' : ' — offline mode'));
+      checkTodayReminders();
+    }
+  }, 300);
+})();
+
+// ============================================================
+// CALENDAR TAB
+// ============================================================
+
+// Track which month/year the calendar is showing
+var calYear  = new Date().getFullYear();
+var calMonth = new Date().getMonth(); // 0-based
+
+/**
+ * goToday — jump calendar back to the current month
+ */
+function goToday() {
+  calYear  = new Date().getFullYear();
+  calMonth = new Date().getMonth();
+  renderCal();
+}
+
+/**
+ * calNav — move calendar forward or backward by one month
+ * @param {number} dir  +1 for next month, -1 for previous
+ */
+function calNav(dir) {
+  calMonth += dir;
+  if (calMonth > 11) { calMonth = 0;  calYear++; }
+  if (calMonth < 0)  { calMonth = 11; calYear--; }
+  // Hide detail panel when navigating
+  document.getElementById('cal-detail').style.display = 'none';
+  renderCal();
+}
+
+/**
+ * renderCal — build the full calendar grid for calYear/calMonth.
+ * Each cell represents one day. Interviews on that day are shown
+ * as colour-coded chips (green=success, amber=pending, red=reject).
+ */
+function renderCal() {
+  try {
+  var cls = document.getElementById('cal-cls') ?
+    document.getElementById('cal-cls').value : '';
+  var st  = document.getElementById('cal-st') ?
+    document.getElementById('cal-st').value : '';
+
+  // Update the month/year title
+  var monthNames = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+  document.getElementById('cal-title').textContent =
+    monthNames[calMonth] + ' ' + calYear;
+
+  // Filter interviews for this month (and apply class/status filters)
+  var monthIvs = ivs.filter(function(iv) {
+    var d = new Date(iv.dt);
+    if (isNaN(d)) return false;
+    if (d.getFullYear() !== calYear || d.getMonth() !== calMonth) return false;
+    if (cls && iv.cls !== cls) return false;
+    if (st  && iv.status !== st) return false;
+    return true;
+  });
+
+  // Update interview count subtitle
+  document.getElementById('cal-count').textContent =
+    monthIvs.length + ' interview' + (monthIvs.length !== 1 ? 's' : '') + ' this month';
+
+  // Group interviews by day-of-month
+  var byDay = {};
+  monthIvs.forEach(function(iv) {
+    var day = new Date(iv.dt).getDate();
+    if (!byDay[day]) byDay[day] = [];
+    byDay[day].push(iv);
+  });
+
+  // Build the grid
+  // Find the first day of the month and how many days it has
+  var firstDay  = new Date(calYear, calMonth, 1).getDay(); // 0=Sun..6=Sat
+  // Convert Sunday-based to Monday-based (Mon=0 .. Sun=6)
+  var startOffset = (firstDay === 0) ? 6 : firstDay - 1;
+  var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  var daysInPrev  = new Date(calYear, calMonth, 0).getDate();
+
+  var today = new Date();
+  var grid  = document.getElementById('cal-grid');
+  var cells = [];
+
+  // Total cells = offset + days in month, rounded up to complete weeks
+  var totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+  for (var i = 0; i < totalCells; i++) {
+    var dayNum, isCurrentMonth;
+
+    if (i < startOffset) {
+      // Days from previous month
+      dayNum = daysInPrev - startOffset + i + 1;
+      isCurrentMonth = false;
+    } else if (i >= startOffset + daysInMonth) {
+      // Days from next month
+      dayNum = i - startOffset - daysInMonth + 1;
+      isCurrentMonth = false;
+    } else {
+      dayNum = i - startOffset + 1;
+      isCurrentMonth = true;
+    }
+
+    var isToday = isCurrentMonth &&
+      dayNum === today.getDate() &&
+      calMonth === today.getMonth() &&
+      calYear  === today.getFullYear();
+
+    var dayIvs = (isCurrentMonth && byDay[dayNum]) ? byDay[dayNum] : [];
+
+    // Sort day interviews by time
+    dayIvs.sort(function(a,b){ return new Date(a.dt) - new Date(b.dt); });
+
+    // Build chips HTML (max 3 visible, then "+N more")
+    var chipsHtml = '';
+    var maxVisible = 3;
+    dayIvs.slice(0, maxVisible).forEach(function(iv) {
+      var bc = iv.status === 'Success' ? 'bs' : iv.status === 'Reject' ? 'br' : 'bp';
+      var t  = new Date(iv.dt).toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
+      var shortName = iv.name.split(' ')[0]; // first word of name
+      chipsHtml += '<div class="cal-iv ' + bc + '" ' +
+        'onclick="event.stopPropagation();openEI(' + iv.id + ')" ' +
+        'title="' + iv.name + ' @ ' + t + '">' +
+        t + ' ' + shortName +
+        '</div>';
+    });
+    if (dayIvs.length > maxVisible) {
+      var more = dayIvs.length - maxVisible;
+      chipsHtml += '<div class="cal-more" onclick="event.stopPropagation();showDayDetail(' +
+        (isCurrentMonth ? dayNum : -1) + ',' + calMonth + ',' + calYear + ')">' +
+        '+' + more + ' more</div>';
+    }
+
+    var cls2 = 'cal-day' +
+      (isToday ? ' today' : '') +
+      (!isCurrentMonth ? ' other-month' : '');
+
+    var clickAttr = isCurrentMonth ?
+      'onclick="showDayDetail(' + dayNum + ',' + calMonth + ',' + calYear + ')"' : '';
+
+    cells.push(
+      '<div class="' + cls2 + '" ' + clickAttr + '>' +
+        '<div class="cal-day-num">' + dayNum + '</div>' +
+        chipsHtml +
+      '</div>'
+    );
+  }
+
+  grid.innerHTML = cells.join('');
+
+  // Rebuild calendar class filter if not already populated
+  var calClsSel = document.getElementById('cal-cls');
+  if (calClsSel && calClsSel.options.length <= 1) {
+    var classes = Array.from(new Set(RAW.map(function(s){ return s.cls; }))).filter(Boolean).sort();
+    classes.forEach(function(c) {
+      var o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      calClsSel.appendChild(o);
+    });
+  }
+  } catch(err) {
+    var grid = document.getElementById('cal-grid');
+    if (grid) grid.innerHTML = '<div style="padding:2rem;color:var(--txd);font-size:13px;grid-column:1/-1">Calendar error: ' + err.message + '</div>';
+    console.error('renderCal error:', err);
+  }
+}
+
+/**
+ * showDayDetail — show the detail panel below the calendar
+ * listing all interviews on the clicked day.
+ * @param {number} day    day of month
+ * @param {number} month  0-based month
+ * @param {number} year   4-digit year
+ */
+function showDayDetail(day, month, year) {
+  if (day < 0) return;
+
+  var monthNames = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+
+  var clsFilter = document.getElementById('cal-cls').value;
+  var stFilter  = document.getElementById('cal-st').value;
+
+  var dayIvs = ivs.filter(function(iv) {
+    var d = new Date(iv.dt);
+    if (isNaN(d)) return false;
+    if (d.getDate() !== day || d.getMonth() !== month || d.getFullYear() !== year) return false;
+    if (clsFilter && iv.cls !== clsFilter) return false;
+    if (stFilter  && iv.status !== stFilter) return false;
+    return true;
+  }).sort(function(a,b){ return new Date(a.dt) - new Date(b.dt); });
+
+  var panel = document.getElementById('cal-detail');
+  var title = document.getElementById('cal-detail-title');
+  var body  = document.getElementById('cal-detail-body');
+
+  title.textContent = day + ' ' + monthNames[month] + ' ' + year +
+    ' — ' + dayIvs.length + ' interview' + (dayIvs.length !== 1 ? 's' : '');
+
+  if (!dayIvs.length) {
+    body.innerHTML = '<p style="color:var(--tx2);font-size:13px">No interviews on this day.</p>';
+    panel.style.display = 'block';
+    return;
+  }
+
+  var bc = { Pending:'bp', Success:'bs', Reject:'br' };
+  body.innerHTML = dayIvs.map(function(iv) {
+    var d = new Date(iv.dt);
+    var t = d.toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:.5px solid var(--bd)">' +
+      '<div style="font-size:13px;font-weight:500;color:var(--tx2);width:52px;flex-shrink:0">' + t + '</div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:500;font-size:13px">' + iv.name + '</div>' +
+        '<div style="font-size:12px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + iv.company + '</div>' +
+      '</div>' +
+      '<span class="bdg bi" style="flex-shrink:0">' + iv.cls + '</span>' +
+      '<span class="bdg ' + bc[iv.status] + '" style="flex-shrink:0">' + iv.status + '</span>' +
+      '<button class="act" onclick="openEI(' + iv.id + ')" title="Edit"><i class="ti ti-edit"></i></button>' +
+      '<button class="act" style="color:var(--txi)" onclick="sendWAReminder(' + iv.id + ')" title="WhatsApp reminder"><i class="ti ti-brand-whatsapp"></i></button>' +
+    '</div>';
+  }).join('') + '<div style="border-bottom:none"></div>';
+
+  panel.style.display = 'block';
+
+  // Scroll the detail panel into view smoothly
+  setTimeout(function(){ panel.scrollIntoView({ behavior:'smooth', block:'nearest' }); }, 50);
+}
+
+// ============================================================
+// STARTUP REMINDER — Option A
+// Runs automatically every time the file is opened.
+// Checks if any interviews are scheduled for today and shows
+// a summary popup with a WhatsApp send button.
+// ============================================================
+
+/**
+ * checkTodayReminders — called on startup after data is loaded.
+ * If there are interviews today, shows a modal summarising them
+ * and offers a one-click WhatsApp bulk send button.
+ */
+function checkTodayReminders() {
+  var today    = new Date();
+  var todayIvs = ivs.filter(function(iv) {
+    var d = new Date(iv.dt);
+    return !isNaN(d) &&
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth()    === today.getMonth() &&
+      d.getDate()     === today.getDate();
+  }).sort(function(a, b) { return new Date(a.dt) - new Date(b.dt); });
+
+  // Nothing today — stay silent
+  if (!todayIvs.length) return;
+
+  // Build the modal content
+  var dateStr = today.toLocaleDateString('en-SG', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+
+  var bc = { Pending: 'bp', Success: 'bs', Reject: 'br' };
+
+  var rows = todayIvs.map(function(iv) {
+    var d = new Date(iv.dt);
+    var t = d.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:.5px solid var(--bd)">' +
+      '<div style="font-size:12px;font-weight:500;color:var(--tx2);width:48px;flex-shrink:0">' + t + '</div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + iv.name + '</div>' +
+        '<div style="font-size:11px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + iv.company + '</div>' +
+      '</div>' +
+      '<span class="bdg bi" style="flex-shrink:0;font-size:10px">' + iv.cls + '</span>' +
+      '<span class="bdg ' + bc[iv.status] + '" style="flex-shrink:0;font-size:10px">' + iv.status + '</span>' +
+    '</div>';
+  }).join('');
+
+  // Show in the shared modal
+  document.getElementById('mod-t').innerHTML =
+    '<span style="color:var(--txw)"><i class="ti ti-bell-ringing" style="vertical-align:-2px"></i> ' +
+    todayIvs.length + ' interview' + (todayIvs.length > 1 ? 's' : '') + ' today</span>';
+
+  document.getElementById('mod-b').innerHTML =
+    '<p style="font-size:12px;color:var(--tx2);margin-bottom:12px">' + dateStr + '</p>' +
+    rows +
+    '<div style="margin-top:1rem;padding:.75rem;background:var(--bg2);border-radius:var(--rm);font-size:12px;color:var(--tx2)">' +
+      '<i class="ti ti-info-circle" style="vertical-align:-2px"></i> ' +
+      'Click <strong>Send WhatsApp</strong> to send a bulk reminder, or close to continue.' +
+    '</div>';
+
+  document.getElementById('mod-f').innerHTML =
+    '<button class="btn" onclick="closeMod()">Close</button>' +
+    '<button class="btn" style="color:var(--txs);border-color:var(--txs)" onclick="closeMod();sendTodayReminders()">' +
+      '<i class="ti ti-brand-whatsapp"></i> Send WhatsApp' +
+    '</button>';
+
+  document.getElementById('ov').classList.add('open');
+}
+
+</script>
+</body>
+</html>
