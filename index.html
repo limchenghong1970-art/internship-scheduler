@@ -1971,44 +1971,120 @@ async function testSupabase() {
 // 4. Restore RAW from localStorage cache if Supabase has none
 // 5. Render UI
 // ============================================================
+/**
+ * withTimeout — wraps a promise with a timeout
+ * so the app never hangs forever on network issues
+ */
+function withTimeout(promise, ms, label) {
+  var timeout = new Promise(function(_, reject) {
+    setTimeout(function() {
+      reject(new Error(label + ' timed out after ' + (ms/1000) + 's'));
+    }, ms);
+  });
+  return Promise.race([promise, timeout]);
+}
+
 async function initApp() {
   setLoading(true);
   setMsg('Connecting to database...');
 
-  // Step 1: connection test
-  var ping = await db.select('students', 'select=idx&limit=1');
-  if (ping.error) {
-    showError('Cannot reach Supabase', ping.error +
-      ' -- Check your internet connection.');
+  // Step 1: Restore RAW from localStorage IMMEDIATELY
+  // Do this before any network calls so the app can work even if Supabase is slow
+  try {
+    var rawCache = localStorage.getItem('ims_raw');
+    if (rawCache) RAW = JSON.parse(rawCache);
+    var ivsCache = localStorage.getItem('ims_ivs_cache');
+    if (ivsCache) ivs = JSON.parse(ivsCache);
+    var stCache = localStorage.getItem('ims_st_cache');
+    if (stCache) ST = JSON.parse(stCache);
+    if (RAW.length) {
+      var classes = countClasses();
+      rebuildClassFilters(classes);
+      cos = Array.from(new Set(RAW.flatMap(function(s){ return s.c; }).filter(Boolean))).sort();
+      console.log('Cache restored: ' + RAW.length + ' students, ' + ivs.length + ' interviews');
+    }
+  } catch(e) {
+    console.warn('Cache restore error:', e);
+  }
+
+  // Step 2: connection test with 8 second timeout
+  setMsg('Connecting to database...');
+  try {
+    var ping = await withTimeout(
+      db.select('students', 'select=idx&limit=1'),
+      8000, 'Connection test'
+    );
+    if (ping.error) {
+      // Show app with cached data even if Supabase unreachable
+      console.warn('Supabase unreachable:', ping.error);
+      if (RAW.length) {
+        popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
+        rebuildClassFilters(countClasses());
+        updateHeader('offline (cached)', RAW.length);
+        setLoading(false);
+        toast('Using cached data — database unavailable');
+        return;
+      }
+      showError('Cannot reach database', ping.error + ' — Check internet connection.');
+      return;
+    }
+  } catch(e) {
+    // Timeout — use cached data if available
+    if (RAW.length) {
+      popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
+      rebuildClassFilters(countClasses());
+      updateHeader('offline (cached)', RAW.length);
+      setLoading(false);
+      toast('Connection timed out — using cached data');
+      return;
+    }
+    showError('Connection timed out', e.message);
     return;
   }
 
-  // Step 2: restore RAW from localStorage cache FIRST
-  // This ensures student names are available before loadAllData runs
-  if (!RAW.length) {
-    try {
-      var rawCache = localStorage.getItem('ims_raw');
-      if (rawCache) {
-        RAW = JSON.parse(rawCache);
-        console.log('RAW restored from cache: ' + RAW.length + ' students');
-      }
-    } catch(e) {}
-  }
-
-  // Step 3: load all live data from Supabase
-  setMsg('Loading data...');
+  // Step 3: Load data with individual step timeouts
+  setMsg('Loading students...');
   try {
-    await loadAllData();
-  } catch(e) {
-    showError('Data load failed', e.message); return;
-  }
+    var r1 = await withTimeout(db.select('student_state'), 8000, 'student_state');
+    if (!r1.error) {
+      (r1.data||[]).forEach(function(row) {
+        ST[row.idx] = {
+          choices: [row.choice_1||'', row.choice_2||'', row.choice_3||''],
+          log: row.log || []
+        };
+        if (!RAW.find(function(r){ return String(r.idx)===String(row.idx); })) {
+          var namePart = row.name || String(row.idx).split('_')[0];
+          var clsPart  = row.cls  || String(row.idx).split('_')[1] || '';
+          RAW.push({ idx:row.idx, cls:clsPart, name:namePart,
+            c:[row.choice_1||'',row.choice_2||'',row.choice_3||''] });
+        }
+      });
+    }
+  } catch(e) { console.warn('student_state load timeout:', e.message); }
 
-  // Step 4: if still no students, show warning
-  if (!RAW.length) {
-    console.warn('No student data found — please load your Excel file');
-  }
+  setMsg('Loading companies...');
+  try {
+    var r2 = await withTimeout(db.select('companies', 'order=name.asc'), 8000, 'companies');
+    if (!r2.error && r2.data && r2.data.length) {
+      cos = r2.data.map(function(row){ return row.name; });
+    }
+  } catch(e) { console.warn('companies load timeout:', e.message); }
 
-  // Step 4: render UI
+  setMsg('Loading interviews...');
+  try {
+    var r3 = await withTimeout(db.select('interviews', 'order=dt.asc'), 8000, 'interviews');
+    if (!r3.error && r3.data && r3.data.length) {
+      ivs = r3.data.map(function(row){
+        return { id:row.id, idx:row.idx, name:row.name, cls:row.cls,
+          company:row.company, rank:row.rank, dt:row.dt,
+          status:row.status, mode:row.mode||'Face to Face' };
+      });
+      // Cache locally
+      try { localStorage.setItem('ims_ivs_cache', JSON.stringify(ivs)); } catch(e) {}
+    }
+  } catch(e) { console.warn('interviews load timeout:', e.message); }
+
+  // Step 4: Render UI
   popStuSel(); popCoFil(); renderStu(); renderIv(); mets();
   var classes = countClasses();
   rebuildClassFilters(classes);
@@ -2018,7 +2094,7 @@ async function initApp() {
   setTimeout(checkTodayReminders, 500);
 }
 
-initApp();
+initApp();;
 
 </script>
 </body>
